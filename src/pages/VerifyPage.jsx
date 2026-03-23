@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Link2, Search, Wallet } from 'lucide-react'
 import { expectedFlow, proofSchema, receiverRules } from '../content'
+import { API } from '../config'
 
 export function VerifyPage({ workflowState, threshold }) {
   const [txId, setTxId] = useState(workflowState.txId || '')
@@ -28,10 +29,38 @@ export function VerifyPage({ workflowState, threshold }) {
     })
 
     try {
-      const response = await fetch(`/api/verify/${encodeURIComponent(txId.trim())}`)
-      const data = await response.json()
-      if (!response.ok || !data.ok) {
-        throw new Error(data.message || 'Verification request failed.')
+      const response = await fetch(
+        `${API.indexerBase}/v2/transactions/${encodeURIComponent(txId.trim())}`
+      )
+      const raw = await response.json()
+      if (!response.ok || !raw.transaction) {
+        throw new Error(raw.message || 'Transaction not found on indexer.')
+      }
+
+      const tx = raw.transaction
+      const payment = tx['payment-transaction'] || {}
+
+      let noteText = ''
+      let noteJson = null
+      if (tx.note) {
+        try {
+          noteText = atob(tx.note)
+          noteJson = JSON.parse(noteText)
+        } catch {
+          // note is not JSON, keep raw text
+        }
+      }
+
+      const data = {
+        ok: true,
+        transactionId: txId.trim(),
+        explorerUrl: `${API.explorerBase}${txId.trim()}`,
+        confirmedRound: tx['confirmed-round'] || null,
+        senderAddress: tx.sender || '',
+        receiverAddress: payment.receiver || '',
+        amountMicroAlgos: payment.amount ?? null,
+        noteText,
+        noteJson,
       }
 
       setVerificationState({
@@ -47,6 +76,7 @@ export function VerifyPage({ workflowState, threshold }) {
       })
     }
   }
+
 
   return (
     <div className="page-shell">

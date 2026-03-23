@@ -5,6 +5,7 @@ import { AnalyzePage } from './pages/AnalyzePage'
 import { DashboardPage } from './pages/DashboardPage'
 import { HomePage } from './pages/HomePage'
 import { VerifyPage } from './pages/VerifyPage'
+import { API } from './config'
 
 const threshold = 75
 const storageKey = 'task-economy-on-blockchain-state'
@@ -112,7 +113,7 @@ function App() {
 
     let analysis
     try {
-      const analysisResponse = await fetch('/api/analyze', {
+      const analysisResponse = await fetch(API.analyze, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -175,7 +176,7 @@ function App() {
     setTasks((current) => [pendingTask, ...current])
 
     try {
-      const response = await fetch('/api/pay', {
+      const response = await fetch(API.pay, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
