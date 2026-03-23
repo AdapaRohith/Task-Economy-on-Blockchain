@@ -1,5 +1,6 @@
 {
   "name": "task-economy-on-blockchain",
+  "homepage": "https://adaparohith.github.io/Task-Economy-on-Blockchain",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -8,7 +9,9 @@
     "server": "node server/index.js",
     "dev:full": "concurrently \"npm:server\" \"npm:dev\"",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
     "@algorandfoundation/algokit-utils": "^9.2.0",
@@ -25,6 +28,7 @@
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.0",
     "concurrently": "^9.2.1",
+    "gh-pages": "^6.3.0",
     "vite": "^7.1.3"
   }
 }
