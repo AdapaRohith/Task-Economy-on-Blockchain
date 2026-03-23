@@ -21,6 +21,27 @@ export function AnalyzePage({
   const resultPreviewRef = useRef(null)
   const isProcessing = workflowState.phase === 'scoring'
   const selectedStackItem = stackItems.find((item) => item.id === selectedStackItemId) ?? stackItems[0]
+  const aiSummary = workflowState.analysis?.summary || 'Waiting for the n8n response.'
+  const aiStatus = workflowState.analysis?.status || 'pending'
+  const explorerLink = workflowState.explorerUrl
+  const n8nPayload = workflowState.analysis
+    ? JSON.stringify(
+        {
+          score: workflowState.analysis.score,
+          status: workflowState.analysis.status,
+          verdict: workflowState.analysis.verdict,
+          model: workflowState.analysis.model,
+        },
+        null,
+        2,
+      )
+    : 'n8n data will appear here once you run the AI score.'
+  const notePayload = workflowState.note ? JSON.stringify(workflowState.note, null, 2) : 'Notes appear after /api/pay executes.'
+
+  const handleVerifyProof = () => {
+    if (!explorerLink || typeof window === 'undefined') return
+    window.open(explorerLink, '_blank', 'noreferrer')
+  }
 
   const handleRun = async () => {
     await onRunWorkflow()
@@ -29,6 +50,98 @@ export function AnalyzePage({
 
   return (
     <div className="page-shell">
+      <section className="analysis-nav">
+        <div className="analysis-nav-grid">
+          <article className="analysis-nav-panel">
+            <div className="analysis-nav-head">
+              <span className="section-kicker">n8n Inputs</span>
+              <h3>Actual values that hit the automation</h3>
+            </div>
+            <div className="analysis-nav-list">
+              <div>
+                <span>Task title</span>
+                <strong>{taskTitle || 'Awaiting submission'}</strong>
+              </div>
+              <div>
+                <span>Task class</span>
+                <strong>{taskType}</strong>
+              </div>
+              <div>
+                <span>Reward amount</span>
+                <strong>{taskBudget ? `${taskBudget} ALGO` : 'Awaiting budget'}</strong>
+              </div>
+              <div>
+                <span>Receiver address</span>
+                <strong className="long-value">{receiverAddress || 'Paste an Algorand Testnet address'}</strong>
+              </div>
+              <div>
+                <span>Execution stack</span>
+                <strong>{selectedStackItem.detail}</strong>
+              </div>
+            </div>
+          </article>
+
+          <article className="analysis-nav-panel">
+            <div className="analysis-nav-head">
+              <span className="section-kicker">n8n Workflow</span>
+              <h3>Execution summary delivered by the automation</h3>
+            </div>
+            <div className="analysis-nav-list">
+              <div>
+                <span>Current phase</span>
+                <strong>{workflowState.phase}</strong>
+              </div>
+              <div>
+                <span>AI provider</span>
+                <strong>{workflowState.analysis?.source ?? 'Local fallback'}</strong>
+              </div>
+              <div>
+                <span>Workflow note</span>
+                <strong>{workflowState.message}</strong>
+              </div>
+              <div>
+                <span>n8n verdict</span>
+                <strong>{aiStatus}</strong>
+              </div>
+            </div>
+          </article>
+
+          <article className="analysis-nav-panel">
+            <div className="analysis-nav-head">
+              <span className="section-kicker">n8n Outputs</span>
+              <h3>Predicted score, AI summary, and proof</h3>
+            </div>
+            <div className="analysis-output-grid">
+              <div className="analysis-value">
+                <span>Predicted score</span>
+                <strong>{workflowState.score ?? '--'}</strong>
+              </div>
+              <div className="analysis-value">
+                <span>AI summary</span>
+                <strong>{aiSummary}</strong>
+              </div>
+              <div className="analysis-value">
+                <span>Transaction ID</span>
+                <strong className="long-value">{workflowState.txId || 'Not issued yet'}</strong>
+              </div>
+            </div>
+            <motion.button
+              type="button"
+              className="analysis-verify-btn"
+              onClick={handleVerifyProof}
+              disabled={!explorerLink}
+              whileHover={{ y: explorerLink ? -2 : 0, scale: explorerLink ? 1.02 : 1 }}
+              whileTap={{ scale: explorerLink ? 0.98 : 1 }}
+            >
+              {explorerLink ? 'Verify proof on Algorand' : 'Waiting for blockchain proof'}
+            </motion.button>
+            <p className="analysis-verify-hint">
+              A confirmation click opens AlgoExplorer so you can ask the blockchain to confirm the payment proof.
+            </p>
+          </article>
+        </div>
+      </section>
+
       <section className="workspace-grid">
         <motion.section
           initial={{ opacity: 0, y: 20 }}
@@ -151,6 +264,30 @@ export function AnalyzePage({
             </motion.button>
           </div>
         </motion.section>
+      </section>
+
+      <section className="analysis-data">
+        <div className="analysis-nav-head">
+          <span className="section-kicker">n8n response</span>
+          <h3>Data emitted by the workflow after “Run AI score”</h3>
+        </div>
+        <div className="analysis-data-grid">
+          <article className="analysis-data-card">
+            <span>AI score & verdict</span>
+            <strong>{workflowState.score ?? '--'} ({aiStatus})</strong>
+            <p>{aiSummary}</p>
+          </article>
+          <article className="analysis-data-card">
+            <span>Analysis payload</span>
+            <pre>{n8nPayload}</pre>
+          </article>
+          <article className="analysis-data-card">
+            <span>Transaction proof</span>
+            <strong className="long-value">{workflowState.txId || 'Transaction pending'}</strong>
+            <p>{workflowState.explorerUrl ? 'AlgoExplorer is ready for verification.' : 'Waiting for /api/pay to broadcast a transaction.'}</p>
+            <pre>{notePayload}</pre>
+          </article>
+        </div>
       </section>
 
       <section className="dashboard-grid" ref={resultPreviewRef}>
