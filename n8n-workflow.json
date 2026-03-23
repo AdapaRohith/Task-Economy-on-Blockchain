@@ -1,0 +1,182 @@
+{
+  "name": "Task Economy on Blockchain",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analyze",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "n1-webhook-analyze",
+      "name": "POST /analyze",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [160, 300],
+      "webhookId": "analyze-webhook-id"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pay",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "n2-webhook-pay",
+      "name": "POST /pay",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [160, 580],
+      "webhookId": "pay-webhook-id"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── /api/analyze handler ───────────────────────────────────────────────────\n// INPUT  (from frontend App.jsx handleRunWorkflow):\n//   { taskTitle, taskType, taskBudget: Number, receiverAddress: string }\n//\n// OUTPUT expected by frontend:\n//   { ok: true, analysis: { score, status, summary, source } }\n//   { ok: false, message: string }   ← on error\n\nconst body = $input.first().json.body;\n\n// ---------- Validate ----------\nif (!body.taskTitle || !body.receiverAddress) {\n  return [{\n    json: {\n      ok: false,\n      message: 'taskTitle and receiverAddress are required.'\n    }\n  }];\n}\n\nconst ALGO_ADDRESS_REGEX = /^[A-Z2-7]{58}$/;\nif (!ALGO_ADDRESS_REGEX.test(body.receiverAddress)) {\n  return [{\n    json: {\n      ok: false,\n      message: 'receiverAddress is not a valid Algorand address (58-char base32).'\n    }\n  }];\n}\n\n// ---------- Simple keyword-based AI scoring ----------\n// Replace this section with a real AI API call (OpenAI, Gemini, etc.)\n// if you want LLM-based evaluation.\nconst SCORING_RULES = [\n  { keywords: ['critical', 'security', 'vulnerability', 'urgent'],     score: 92 },\n  { keywords: ['payment', 'blockchain', 'algorand', 'smart contract'],  score: 88 },\n  { keywords: ['code review', 'refactor', 'architecture'],              score: 82 },\n  { keywords: ['feature', 'develop', 'implement', 'build'],             score: 78 },\n  { keywords: ['test', 'qa', 'quality', 'verify'],                      score: 74 },\n  { keywords: ['bug', 'fix', 'patch', 'repair'],                        score: 70 },\n  { keywords: ['document', 'readme', 'wiki', 'write'],                  score: 65 },\n];\n\nconst titleLower = (body.taskTitle + ' ' + body.taskType).toLowerCase();\nlet score = 60; // baseline\nfor (const rule of SCORING_RULES) {\n  if (rule.keywords.some(kw => titleLower.includes(kw))) {\n    score = rule.score;\n    break;\n  }\n}\n\n// Budget modifier: tasks with higher budgets get a slight boost (capped at 5pts)\nconst budgetBonus = Math.min(5, Math.floor((body.taskBudget || 0) * 10));\nscore = Math.min(100, score + budgetBonus);\n\nconst status = score >= 75 ? 'completed' : 'failed';\n\nconst summaryMap = {\n  completed: `Task \"${body.taskTitle}\" scored ${score}/100 — above the payment threshold. AI evaluation approved.`,\n  failed:    `Task \"${body.taskTitle}\" scored ${score}/100 — below the payment threshold. Payment will be skipped.`\n};\n\nreturn [{\n  json: {\n    ok: true,\n    analysis: {\n      score,\n      status,\n      summary: summaryMap[status],\n      source:  'n8n-backend-analysis'\n    }\n  }\n}];\n"
+      },
+      "id": "n3-analyze-score",
+      "name": "AI Score Calculator",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json.ok ? 200 : 400 }}"
+        }
+      },
+      "id": "n4-respond-analyze",
+      "name": "Respond to /analyze",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── /api/pay handler ────────────────────────────────────────────────────────\n// INPUT  (from frontend App.jsx handleRunWorkflow):\n//   { taskId, receiver, score: Number, status: string, amountAlgo: Number }\n//\n// OUTPUT expected by frontend (skipped path):\n//   { ok: true, skipped: true, message: string }\n//\n// OUTPUT expected by frontend (success path):\n//   { ok: true, skipped: false, transactionId, explorerUrl, confirmedRound, note, receiverAddress }\n//\n// OUTPUT on error:\n//   { ok: false, message: string }\n\nconst THRESHOLD = 75;\nconst body = $input.first().json.body;\n\n// ---------- Validate ----------\nif (!body.taskId || !body.receiver || body.score === undefined) {\n  return [{\n    json: {\n      ok: false,\n      message: 'taskId, receiver, and score are required.'\n    }\n  }];\n}\n\n// ---------- Threshold gate ----------\nif (body.score < THRESHOLD || body.status !== 'completed') {\n  return [{\n    json: {\n      ok: true,\n      skipped: true,\n      message: `Score ${body.score} is below the ${THRESHOLD} threshold — payment skipped.`\n    }\n  }];\n}\n\n// ---------- Algorand payment ----------\n// ⚠️  This section calls the Algorand Testnet.\n// The HTTP Request node (n6-algorand-pay) handles the actual network call.\n// We just pass the validated payload forward.\nreturn [{\n  json: {\n    _validated: true,\n    taskId:     body.taskId,\n    receiver:   body.receiver,\n    score:      body.score,\n    status:     body.status,\n    amountAlgo: body.amountAlgo || 0.10\n  }\n}];\n"
+      },
+      "id": "n5-pay-gate",
+      "name": "Threshold Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 580]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:4000/internal/algorand-pay",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "n6-algorand-pay",
+      "name": "Call Algorand Pay Service",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 520],
+      "notes": "Replace this URL with your real Algorand payment microservice or Algorand node RPC.\nAlternatively, use the n8n-nodes-algorand community node if installed."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Map the Algorand pay service response into the shape the frontend expects.\n// If the HTTP Request fails, n8n routes to the error branch — see n8-pay-error.\n\nconst algoResponse = $input.first().json;\nconst incoming     = $('Threshold Gate').first().json;\n\n// Build the note payload that gets stored on-chain\nconst note = {\n  taskId: incoming.taskId,\n  score:  incoming.score,\n  status: incoming.status\n};\n\nconst txId          = algoResponse.transactionId || algoResponse.txId || 'SIMULATED-TX-ID';\nconst confirmedRound = algoResponse.confirmedRound || algoResponse.round || 0;\nconst explorerUrl   = `https://testnet.explorer.perawallet.app/tx/${txId}`;\n\nreturn [{\n  json: {\n    ok:              true,\n    skipped:         false,\n    transactionId:   txId,\n    explorerUrl,\n    confirmedRound,\n    note,\n    receiverAddress: incoming.receiver\n  }\n}];\n"
+      },
+      "id": "n7-pay-success",
+      "name": "Build Pay Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 520]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Error handler: called when the Algorand pay HTTP request fails.\nconst error = $input.first().json;\nreturn [{\n  json: {\n    ok: false,\n    message: error.message || error.error || 'Algorand payment service returned an error.'\n  }\n}];\n"
+      },
+      "id": "n8-pay-error",
+      "name": "Pay Error Handler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 640]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json.ok ? 200 : 500 }}"
+        }
+      },
+      "id": "n9-respond-pay",
+      "name": "Respond to /pay",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1280, 580]
+    }
+  ],
+  "connections": {
+    "POST /analyze": {
+      "main": [
+        [{ "node": "AI Score Calculator", "type": "main", "index": 0 }]
+      ]
+    },
+    "AI Score Calculator": {
+      "main": [
+        [{ "node": "Respond to /analyze", "type": "main", "index": 0 }]
+      ]
+    },
+    "POST /pay": {
+      "main": [
+        [{ "node": "Threshold Gate", "type": "main", "index": 0 }]
+      ]
+    },
+    "Threshold Gate": {
+      "main": [
+        [{ "node": "Call Algorand Pay Service", "type": "main", "index": 0 }],
+        [{ "node": "Respond to /pay", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call Algorand Pay Service": {
+      "main": [
+        [{ "node": "Build Pay Response", "type": "main", "index": 0 }]
+      ],
+      "error": [
+        [{ "node": "Pay Error Handler", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Pay Response": {
+      "main": [
+        [{ "node": "Respond to /pay", "type": "main", "index": 0 }]
+      ]
+    },
+    "Pay Error Handler": {
+      "main": [
+        [{ "node": "Respond to /pay", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "n8nVersion": "1.0.0"
+  },
+  "tags": ["blockchain", "algorand", "task-economy"],
+  "active": true
+}

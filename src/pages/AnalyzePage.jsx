@@ -1,7 +1,17 @@
 import { useRef } from 'react'
-import { motion } from 'framer-motion'
-import { BrainCircuit, Server, Sparkles, Wallet } from 'lucide-react'
-import { backendChecklist, frontendChecklist, receiverRules, stackItems } from '../content'
+import { motion, AnimatePresence } from 'framer-motion'
+import {
+  BrainCircuit,
+  CheckCircle2,
+  ChevronDown,
+  Loader2,
+  Sparkles,
+  Wallet,
+  XCircle,
+  ExternalLink,
+  ShieldCheck,
+} from 'lucide-react'
+import { receiverRules } from '../content'
 
 export function AnalyzePage({
   selectedStackItemId,
@@ -18,284 +28,268 @@ export function AnalyzePage({
   threshold,
   onRunWorkflow,
 }) {
-  const resultPreviewRef = useRef(null)
+  const resultsRef = useRef(null)
   const isProcessing = workflowState.phase === 'scoring'
-  const selectedStackItem = stackItems.find((item) => item.id === selectedStackItemId) ?? stackItems[0]
-  const aiSummary = workflowState.analysis?.summary || 'Waiting for the n8n response.'
-  const aiStatus = workflowState.analysis?.status || 'pending'
-  const explorerLink = workflowState.explorerUrl
-  const n8nPayload = workflowState.analysis
-    ? JSON.stringify(
-        {
-          score: workflowState.analysis.score,
-          status: workflowState.analysis.status,
-          verdict: workflowState.analysis.verdict,
-          model: workflowState.analysis.model,
-        },
-        null,
-        2,
-      )
-    : 'n8n data will appear here once you run the AI score.'
-  const notePayload = workflowState.note ? JSON.stringify(workflowState.note, null, 2) : 'Notes appear after /api/pay executes.'
+  const hasResults = workflowState.phase !== 'idle' && workflowState.phase !== 'error'
+  const isSuccess = workflowState.phase === 'success'
+  const isSkipped = workflowState.phase === 'skipped'
+  const isError = workflowState.phase === 'error'
 
-  const handleVerifyProof = () => {
-    if (!explorerLink || typeof window === 'undefined') return
-    window.open(explorerLink, '_blank', 'noreferrer')
-  }
+  const score = workflowState.score ?? null
+  const scorePasses = score !== null && score >= threshold
+  const aiSummary = workflowState.analysis?.summary || ''
+  const txId = workflowState.txId || ''
+  const explorerLink = workflowState.explorerUrl || ''
 
   const handleRun = async () => {
     await onRunWorkflow()
-    resultPreviewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setTimeout(() => {
+      resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 300)
+  }
+
+  const handleVerify = () => {
+    if (!explorerLink) return
+    window.open(explorerLink, '_blank', 'noreferrer')
   }
 
   return (
     <div className="page-shell">
-      <section className="analysis-nav">
-        <div className="analysis-nav-grid">
-          <article className="analysis-nav-panel">
-            <div className="analysis-nav-head">
-              <span className="section-kicker">n8n Inputs</span>
-              <h3>Actual values that hit the automation</h3>
-            </div>
-            <div className="analysis-nav-list">
-              <div>
-                <span>Task title</span>
-                <strong>{taskTitle || 'Awaiting submission'}</strong>
-              </div>
-              <div>
-                <span>Task class</span>
-                <strong>{taskType}</strong>
-              </div>
-              <div>
-                <span>Reward amount</span>
-                <strong>{taskBudget ? `${taskBudget} ALGO` : 'Awaiting budget'}</strong>
-              </div>
-              <div>
-                <span>Receiver address</span>
-                <strong className="long-value">{receiverAddress || 'Paste an Algorand Testnet address'}</strong>
-              </div>
-              <div>
-                <span>Execution stack</span>
-                <strong>{selectedStackItem.detail}</strong>
-              </div>
-            </div>
-          </article>
 
-          <article className="analysis-nav-panel">
-            <div className="analysis-nav-head">
-              <span className="section-kicker">n8n Workflow</span>
-              <h3>Execution summary delivered by the automation</h3>
-            </div>
-            <div className="analysis-nav-list">
-              <div>
-                <span>Current phase</span>
-                <strong>{workflowState.phase}</strong>
-              </div>
-              <div>
-                <span>AI provider</span>
-                <strong>{workflowState.analysis?.source ?? 'Local fallback'}</strong>
-              </div>
-              <div>
-                <span>Workflow note</span>
-                <strong>{workflowState.message}</strong>
-              </div>
-              <div>
-                <span>n8n verdict</span>
-                <strong>{aiStatus}</strong>
-              </div>
-            </div>
-          </article>
-
-          <article className="analysis-nav-panel">
-            <div className="analysis-nav-head">
-              <span className="section-kicker">n8n Outputs</span>
-              <h3>Predicted score, AI summary, and proof</h3>
-            </div>
-            <div className="analysis-output-grid">
-              <div className="analysis-value">
-                <span>Predicted score</span>
-                <strong>{workflowState.score ?? '--'}</strong>
-              </div>
-              <div className="analysis-value">
-                <span>AI summary</span>
-                <strong>{aiSummary}</strong>
-              </div>
-              <div className="analysis-value">
-                <span>Transaction ID</span>
-                <strong className="long-value">{workflowState.txId || 'Not issued yet'}</strong>
-              </div>
-            </div>
-            <motion.button
-              type="button"
-              className="analysis-verify-btn"
-              onClick={handleVerifyProof}
-              disabled={!explorerLink}
-              whileHover={{ y: explorerLink ? -2 : 0, scale: explorerLink ? 1.02 : 1 }}
-              whileTap={{ scale: explorerLink ? 0.98 : 1 }}
-            >
-              {explorerLink ? 'Verify proof on Algorand' : 'Waiting for blockchain proof'}
-            </motion.button>
-            <p className="analysis-verify-hint">
-              A confirmation click opens AlgoExplorer so you can ask the blockchain to confirm the payment proof.
-            </p>
-          </article>
+      {/* ── SECTION 1: INPUT FORM ── */}
+      <motion.section
+        initial={{ opacity: 0, y: 18 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="analyze-form-section"
+      >
+        <div className="analyze-form-header">
+          <div className="analyze-form-header-label">
+            <Sparkles size={16} />
+            <span>Task Submission</span>
+          </div>
+          <h2>Fill in the task details and run the AI score</h2>
+          <p className="analyze-form-subtitle">
+            Once submitted, the data is forwarded to n8n for scoring. When the score
+            passes the threshold of <strong>{threshold}</strong>, payment is executed
+            on Algorand Testnet.
+          </p>
         </div>
-      </section>
 
-      <section className="workspace-grid">
-        <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: '-60px' }}
-          transition={{ duration: 0.45 }}
-          className="workspace-panel"
-        >
-          <div className="section-head">
-            <div>
-              <span className="section-kicker">Backend Implementation</span>
-              <h2>Analyze page is dedicated to execution and payment logic.</h2>
-            </div>
-            <Server size={18} />
-          </div>
-
-          <div className="spec-stack">
-            <article className="spec-card">
-              <strong>Allowed toolchain</strong>
-              <div className="stack-grid">
-                {stackItems.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`stack-card accent-${item.accent} ${selectedStackItem.id === item.id ? 'active' : ''}`}
-                    onClick={() => setSelectedStackItemId(item.id)}
-                  >
-                    <span>{item.category}</span>
-                    <strong>{item.name}</strong>
-                    <p>{item.detail}</p>
-                  </button>
-                ))}
-              </div>
-            </article>
-
-            <article className="spec-card">
-              <strong>Backend checklist</strong>
-              <ul className="spec-list">
-                {backendChecklist.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </article>
-          </div>
-        </motion.section>
-
-        <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: '-60px' }}
-          transition={{ duration: 0.45, delay: 0.08 }}
-          className="workspace-panel"
-        >
-          <div className="section-head">
-            <div>
-              <span className="section-kicker">Analysis Runner</span>
-              <h2>Run AI scoring and call the Algorand payment API here.</h2>
-            </div>
-            <Sparkles size={18} />
-          </div>
-
-          <div className="form-grid">
-            <label>
-              Task title
-              <input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} />
+        <div className="analyze-form-body">
+          <div className="analyze-input-grid">
+            <label className="analyze-label">
+              <span>Task Title</span>
+              <input
+                className="analyze-input"
+                value={taskTitle}
+                onChange={(e) => setTaskTitle(e.target.value)}
+                placeholder="Describe the task…"
+                disabled={isProcessing}
+              />
             </label>
-            <label>
-              Reward amount in ALGO
-              <input value={taskBudget} onChange={(event) => setTaskBudget(event.target.value)} />
+
+            <label className="analyze-label">
+              <span>Reward Amount (ALGO)</span>
+              <input
+                className="analyze-input"
+                type="number"
+                value={taskBudget}
+                onChange={(e) => setTaskBudget(e.target.value)}
+                placeholder="e.g. 0.10"
+                min="0"
+                step="0.01"
+                disabled={isProcessing}
+              />
             </label>
-            <label>
-              Task class
-              <select value={taskType} onChange={(event) => setTaskType(event.target.value)}>
+
+            <label className="analyze-label">
+              <span>Task Class</span>
+              <select
+                className="analyze-input analyze-select"
+                value={taskType}
+                onChange={(e) => setTaskType(e.target.value)}
+                disabled={isProcessing}
+              >
                 <option>Research</option>
                 <option>Code Review</option>
                 <option>Analytics</option>
                 <option>Payment Verification</option>
               </select>
             </label>
-            <label>
-              Receiver Algorand address
-              <input
-                value={receiverAddress}
-                onChange={(event) => setReceiverAddress(event.target.value)}
-                placeholder="Paste Algorand Testnet address"
-              />
+
+            <label className="analyze-label full-width">
+              <span>Receiver Algorand Address</span>
+              <div className="analyze-input-icon-wrap">
+                <Wallet size={15} className="analyze-input-icon" />
+                <input
+                  className="analyze-input with-icon"
+                  value={receiverAddress}
+                  onChange={(e) => setReceiverAddress(e.target.value)}
+                  placeholder="Paste Algorand Testnet address here…"
+                  disabled={isProcessing}
+                />
+              </div>
             </label>
           </div>
 
-          <div className="assignment-card">
-            <span className="assignment-label">Frontend updates from prompt</span>
-            <ul className="spec-list compact-list">
-              {frontendChecklist.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
+          {/* Error state */}
+          <AnimatePresence>
+            {isError && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="analyze-error-row"
+              >
+                <XCircle size={16} />
+                <span>{workflowState.message}</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-            <div className="wallet-row">
-              <Wallet size={15} />
-              <span>{receiverAddress || 'Receiver input must be a valid Algorand address'}</span>
-            </div>
-            <div className="workflow-score">
-              <span>Threshold rule</span>
-              <strong>{threshold}</strong>
-              <span>Payment executes only when score is greater than or equal to threshold.</span>
-            </div>
-            <div className={`run-feedback run-feedback-${workflowState.phase}`}>
-              <span className="run-feedback-label">Current state</span>
-              <strong>{isProcessing ? 'Running AI score and payment check...' : workflowState.phase}</strong>
-              <p>{workflowState.message}</p>
-            </div>
-            <motion.button
-              className={`primary-action action-button ${isProcessing ? 'is-processing' : ''}`}
-              onClick={handleRun}
-              whileHover={{ y: -2, scale: 1.01 }}
-              whileTap={{ scale: 0.99 }}
-              disabled={isProcessing}
+          <motion.button
+            className={`analyze-run-btn${isProcessing ? ' is-processing' : ''}`}
+            onClick={handleRun}
+            disabled={isProcessing}
+            whileHover={!isProcessing ? { y: -2, scale: 1.01 } : {}}
+            whileTap={!isProcessing ? { scale: 0.99 } : {}}
+          >
+            {isProcessing ? (
+              <>
+                <Loader2 size={18} className="spin-icon" />
+                Running AI score…
+              </>
+            ) : (
+              <>
+                <BrainCircuit size={18} />
+                Run AI Score
+              </>
+            )}
+          </motion.button>
+        </div>
+      </motion.section>
+
+      {/* ── SECTION 2: AI RESULTS ── */}
+      <div ref={resultsRef}>
+        <AnimatePresence>
+          {(hasResults || isProcessing) && (
+            <motion.section
+              key="results"
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+              transition={{ duration: 0.44 }}
+              className={`analyze-result-card${isProcessing ? ' result-loading' : ''}${isSuccess ? ' result-success' : ''}${isSkipped ? ' result-skipped' : ''}`}
             >
-              {isProcessing ? 'Running AI score...' : 'Run AI score and call /api/pay'}
-            </motion.button>
-          </div>
-        </motion.section>
-      </section>
+              <div className="result-card-header">
+                <div className="analyze-form-header-label">
+                  <BrainCircuit size={16} />
+                  <span>n8n AI Result</span>
+                </div>
+                <h3>AI scoring and payment outcome</h3>
+              </div>
 
-      <section className="analysis-data">
-        <div className="analysis-nav-head">
-          <span className="section-kicker">n8n response</span>
-          <h3>Data emitted by the workflow after “Run AI score”</h3>
-        </div>
-        <div className="analysis-data-grid">
-          <article className="analysis-data-card">
-            <span>AI score & verdict</span>
-            <strong>{workflowState.score ?? '--'} ({aiStatus})</strong>
-            <p>{aiSummary}</p>
-          </article>
-          <article className="analysis-data-card">
-            <span>Analysis payload</span>
-            <pre>{n8nPayload}</pre>
-          </article>
-          <article className="analysis-data-card">
-            <span>Transaction proof</span>
-            <strong className="long-value">{workflowState.txId || 'Transaction pending'}</strong>
-            <p>{workflowState.explorerUrl ? 'AlgoExplorer is ready for verification.' : 'Waiting for /api/pay to broadcast a transaction.'}</p>
-            <pre>{notePayload}</pre>
-          </article>
-        </div>
-      </section>
+              {isProcessing ? (
+                <div className="result-loading-state">
+                  <Loader2 size={32} className="spin-icon spin-large" />
+                  <p>Contacting n8n workflow and running AI analysis…</p>
+                </div>
+              ) : (
+                <div className="result-body">
+                  {/* Score Badge */}
+                  <div className="result-score-row">
+                    <div className={`score-badge${scorePasses ? ' pass' : ' fail'}`}>
+                      <span className="score-number">{score ?? '--'}</span>
+                      <span className="score-label">/ 100</span>
+                    </div>
+                    <div className="score-meta">
+                      <div className={`score-verdict${scorePasses ? ' verdict-pass' : ' verdict-fail'}`}>
+                        {scorePasses ? (
+                          <><CheckCircle2 size={16} /> Threshold passed — payment executed</>
+                        ) : (
+                          <><XCircle size={16} /> Below threshold — payment skipped</>
+                        )}
+                      </div>
+                      <p className="score-threshold-note">
+                        Threshold: <strong>{threshold}</strong> · Score must be ≥ threshold for Algorand payment.
+                      </p>
+                    </div>
+                  </div>
 
-      <section className="dashboard-grid" ref={resultPreviewRef}>
+                  {/* AI Summary */}
+                  {aiSummary && (
+                    <div className="result-block">
+                      <span className="result-block-label">AI Summary</span>
+                      <p className="result-summary-text">{aiSummary}</p>
+                    </div>
+                  )}
+
+                  {/* Status message */}
+                  {workflowState.message && (
+                    <div className="result-block">
+                      <span className="result-block-label">Workflow note</span>
+                      <p className="result-summary-text">{workflowState.message}</p>
+                    </div>
+                  )}
+
+                  {/* Transaction ID */}
+                  <div className="result-block">
+                    <span className="result-block-label">Transaction ID</span>
+                    <div className="result-txid-row">
+                      {txId ? (
+                        <>
+                          <code className="result-txid">{txId}</code>
+                          {explorerLink && (
+                            <a
+                              href={explorerLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="txid-explorer-link"
+                            >
+                              <ExternalLink size={13} />
+                              AlgoExplorer
+                            </a>
+                          )}
+                        </>
+                      ) : (
+                        <span className="result-txid-empty">
+                          {isSkipped ? 'No transaction — score below threshold.' : 'Transaction not yet issued.'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Verify Button */}
+                  <motion.button
+                    className={`verify-blockchain-btn${explorerLink ? '' : ' disabled'}`}
+                    onClick={handleVerify}
+                    disabled={!explorerLink}
+                    whileHover={explorerLink ? { y: -2, scale: 1.015 } : {}}
+                    whileTap={explorerLink ? { scale: 0.98 } : {}}
+                  >
+                    <ShieldCheck size={18} />
+                    {explorerLink ? 'Verify on Blockchain' : 'Waiting for blockchain proof…'}
+                  </motion.button>
+                  {explorerLink && (
+                    <p className="verify-hint">
+                      Opens AlgoExplorer on Algorand Testnet so you can confirm the payment proof on-chain.
+                    </p>
+                  )}
+                </div>
+              )}
+            </motion.section>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* ── SECTION 3: EXECUTION PREVIEW + RECEIVER RULES (BOTTOM) ── */}
+      <section className="dashboard-grid analyze-bottom-sections">
         <section className="workspace-panel">
           <div className="section-head">
             <div>
               <span className="section-kicker">Execution Preview</span>
-              <h2>Analyze route keeps immediate workflow response visible.</h2>
+              <h2>Live workflow response data from the last run.</h2>
             </div>
             <BrainCircuit size={18} />
           </div>
@@ -304,12 +298,12 @@ export function AnalyzePage({
             <div className="mini-card">
               <span>Latest score</span>
               <strong>{workflowState.score ?? '--'}</strong>
-              <p>{workflowState.message}</p>
+              <p>{workflowState.message || 'Run AI Score to see the result.'}</p>
             </div>
             <div className="mini-card">
               <span>Analysis source</span>
               <strong>{workflowState.analysis?.source || 'Not available yet'}</strong>
-              <p>{workflowState.analysis?.verdict || 'Backend analysis verdict appears here before payment execution.'}</p>
+              <p>{workflowState.analysis?.verdict || 'Backend analysis verdict appears here after scoring.'}</p>
             </div>
             <div className="mini-card">
               <span>Transaction ID</span>
@@ -318,7 +312,9 @@ export function AnalyzePage({
             </div>
             <div className="mini-card">
               <span>NOTE payload</span>
-              <strong className="long-value">{workflowState.note ? JSON.stringify(workflowState.note) : 'Not generated yet'}</strong>
+              <strong className="long-value">
+                {workflowState.note ? JSON.stringify(workflowState.note) : 'Not generated yet'}
+              </strong>
               <p>Stored on-chain for transparent audit trail and verification.</p>
             </div>
           </div>
@@ -328,7 +324,7 @@ export function AnalyzePage({
           <div className="section-head">
             <div>
               <span className="section-kicker">Receiver Rules</span>
-              <h2>Address handling is separated clearly on the Analyze route.</h2>
+              <h2>Address handling on the Analyze route.</h2>
             </div>
             <Wallet size={18} />
           </div>
@@ -337,12 +333,13 @@ export function AnalyzePage({
             {receiverRules.map((item) => (
               <div key={item} className="mini-card">
                 <strong>{item}</strong>
-                <p>Receiver handling stays aligned to the Algorand-only prompt with lightweight validation rules.</p>
+                <p>Receiver handling stays Algorand-native with lightweight validation rules.</p>
               </div>
             ))}
           </div>
         </section>
       </section>
+
     </div>
   )
 }
