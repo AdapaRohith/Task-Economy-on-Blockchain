@@ -51,7 +51,9 @@ function App() {
   const [taskTitle, setTaskTitle] = useState(persistedState?.taskTitle || 'Trigger Algorand-native payment after AI evaluation')
   const [taskBudget, setTaskBudget] = useState(persistedState?.taskBudget || '0.10')
   const [taskType, setTaskType] = useState(persistedState?.taskType || 'Code Review')
-  const [receiverAddress, setReceiverAddress] = useState(persistedState?.receiverAddress || '')
+  const [receiverAddress, setReceiverAddress] = useState(
+    persistedState?.receiverAddress || '77432YTGN5CDXV6N5F275UQXCQ3WTOSNQPZIROYXOSDJL6GW7E3EIKQ2YE',
+  )
   const [workflowState, setWorkflowState] = useState(
     persistedState?.workflowState || {
       phase: 'idle',

@@ -1,20 +1,32 @@
 // ─── API Configuration ──────────────────────────────────────────────────────
-// When running locally with Express backend: leave N8N_WEBHOOK_BASE empty.
-// When deployed to GitHub Pages (static): set your n8n webhook base URL.
+// Local development (localhost): uses Express backend via /api (Vite proxy).
+// Deployed static app: requires VITE_N8N_WEBHOOK_BASE.
 //
-// n8n Cloud example:  https://YOUR-INSTANCE.app.n8n.cloud/webhook
-// Self-hosted example: https://your-n8n-domain.com/webhook
+// Optional env var:
+//   VITE_N8N_WEBHOOK_BASE=https://YOUR-INSTANCE.app.n8n.cloud/webhook
+//   VITE_USE_N8N_ON_LOCALHOST=true
 // ─────────────────────────────────────────────────────────────────────────────
 
-const N8N_WEBHOOK_BASE = 'https://adaparohith.app.n8n.cloud/webhook'
+const configuredWebhookBase = String(import.meta.env.VITE_N8N_WEBHOOK_BASE || '').trim()
+const isLocalhost =
+  typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
+const useN8nOnLocalhost = String(import.meta.env.VITE_USE_N8N_ON_LOCALHOST || 'false').toLowerCase() === 'true'
+
+const API_BASE = isLocalhost
+  ? (useN8nOnLocalhost && configuredWebhookBase ? configuredWebhookBase : '/api')
+  : configuredWebhookBase
 
 // Algorand Testnet indexer (public, no auth needed)
 const INDEXER_BASE = 'https://testnet-idx.algonode.cloud'
 const EXPLORER_BASE = 'https://testnet.algoexplorer.io/tx/'
 
 export const API = {
-  analyze: `${N8N_WEBHOOK_BASE}/analyze`,
-  pay: `${N8N_WEBHOOK_BASE}/pay`,
+  analyze: `${API_BASE}/analyze`,
+  pay: `${API_BASE}/pay`,
   indexerBase: INDEXER_BASE,
   explorerBase: EXPLORER_BASE,
+}
+
+if (!configuredWebhookBase && (!isLocalhost || useN8nOnLocalhost)) {
+  console.warn('VITE_N8N_WEBHOOK_BASE is not set. Analyze/Pay endpoints will not be available in deployed mode.')
 }

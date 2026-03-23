@@ -2,6 +2,29 @@ import { motion } from 'framer-motion'
 import { LayoutDashboard, ShieldCheck } from 'lucide-react'
 
 export function DashboardPage({ tasks, workflowState, threshold }) {
+  const getQualityFromScore = (value) => {
+    if (!Number.isFinite(Number(value))) return 'Not evaluated yet'
+    const score = Number(value)
+
+    if (score >= 90) return 'Excellent'
+    if (score >= 75) return 'Good'
+    if (score >= 60) return 'Fair'
+    return 'Needs improvement'
+  }
+
+  const getTaskScore = (task) => {
+    if (Number.isFinite(Number(task.analysis?.score))) {
+      return Number(task.analysis.score)
+    }
+
+    try {
+      const parsed = JSON.parse(task.proofHash)
+      return Number.isFinite(Number(parsed?.score)) ? Number(parsed.score) : null
+    } catch {
+      return null
+    }
+  }
+
   const stats = {
     total: tasks.length,
     completed: tasks.filter((task) => task.status === 'Completed').length,
@@ -60,32 +83,41 @@ export function DashboardPage({ tasks, workflowState, threshold }) {
           </div>
 
           <div className="task-list">
-            {tasks.map((task) => (
-              <motion.article
-                key={task.id}
-                className="task-card"
-                initial={{ opacity: 0, y: 18 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.35 }}
-                whileHover={{ y: -4 }}
-              >
-                <div className="task-topline">
-                  <span className="task-id">{task.id}</span>
-                  <span className={`status-badge status-${task.status.toLowerCase().replace(/\s+/g, '-')}`}>{task.status}</span>
-                </div>
-                <h3>{task.title}</h3>
-                <div className="task-info">
-                  <span>Budget: {task.budget}</span>
-                  <span>Analysis: {task.analysis?.source || 'N/A'}</span>
-                </div>
-                <div className="task-proof">
-                  <span>Proof: {task.proofHash}</span>
-                  <span>Transaction: {task.rewardTx}</span>
-                </div>
-                <p>{task.verification}</p>
-              </motion.article>
-            ))}
+            {tasks.map((task) => {
+              const taskScore = getTaskScore(task)
+              const qualityLabel = getQualityFromScore(taskScore)
+
+              return (
+                <motion.article
+                  key={task.id}
+                  className="task-card"
+                  initial={{ opacity: 0, y: 18 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.35 }}
+                  whileHover={{ y: -4 }}
+                >
+                  <div className="task-topline">
+                    <span className="task-id">{task.id}</span>
+                    <span className={`status-badge status-${task.status.toLowerCase().replace(/\s+/g, '-')}`}>{task.status}</span>
+                  </div>
+                  <h3>{task.title}</h3>
+                  <div className="task-info">
+                    <span>Budget: {task.budget}</span>
+                    <span>Analysis: {task.analysis?.source || 'N/A'}</span>
+                  </div>
+                  <div className="task-info">
+                    <span>Score: {taskScore ?? '--'}</span>
+                    <span>Quality: {qualityLabel}</span>
+                  </div>
+                  <div className="task-proof">
+                    <span>Proof: {task.proofHash}</span>
+                    <span>Transaction: {task.rewardTx}</span>
+                  </div>
+                  <p>{task.verification}</p>
+                </motion.article>
+              )
+            })}
           </div>
         </motion.section>
 

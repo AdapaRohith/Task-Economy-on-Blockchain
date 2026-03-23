@@ -270,6 +270,22 @@ const handlePayRequest = async (req, res) => {
     const sender = await getPlatformAccount()
     const suggestedParams = await algodClient.getTransactionParams().do()
     const algoToSend = isPositiveNumber(amountAlgo) ? Number(amountAlgo) : paymentAmountAlgo
+    const amountMicroAlgos = algosdk.algosToMicroalgos(algoToSend)
+    const minFeeMicroAlgos = Number(suggestedParams.minFee || suggestedParams.fee || 1000)
+    const requiredMicroAlgos = amountMicroAlgos + minFeeMicroAlgos
+
+    const senderAccountInfo = await algodClient.accountInformation(sender.addr).do()
+    const senderBalanceMicroAlgos = Number(senderAccountInfo.amount || 0)
+
+    if (senderBalanceMicroAlgos < requiredMicroAlgos) {
+      return res.status(400).json({
+        ok: false,
+        message: `Insufficient funds in sender account ${sender.addr}. Balance ${senderBalanceMicroAlgos} microAlgos is below required ${requiredMicroAlgos} microAlgos. Fund this Testnet account and retry.`,
+        senderAddress: sender.addr,
+        balanceMicroAlgos: senderBalanceMicroAlgos,
+        requiredMicroAlgos,
+      })
+    }
 
     const notePayload = {
       taskId,
@@ -280,7 +296,7 @@ const handlePayRequest = async (req, res) => {
     const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
       sender: sender.addr,
       receiver: normalizedReceiver,
-      amount: algosdk.algosToMicroalgos(algoToSend),
+      amount: amountMicroAlgos,
       note: new TextEncoder().encode(JSON.stringify(notePayload)),
       suggestedParams,
     })
@@ -296,7 +312,7 @@ const handlePayRequest = async (req, res) => {
       confirmedRound: confirmation['confirmed-round'],
       explorerUrl: `${explorerBase}${submission.txid}`,
       amountAlgo: algoToSend,
-      amountMicroAlgos: algosdk.algosToMicroalgos(algoToSend),
+      amountMicroAlgos,
       note: notePayload,
       senderAddress: sender.addr,
       receiverAddress: normalizedReceiver,

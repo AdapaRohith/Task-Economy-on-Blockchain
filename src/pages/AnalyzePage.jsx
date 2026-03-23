@@ -30,7 +30,8 @@ export function AnalyzePage({
 }) {
   const resultsRef = useRef(null)
   const isProcessing = workflowState.phase === 'scoring'
-  const hasResults = workflowState.phase !== 'idle' && workflowState.phase !== 'error'
+  const hasResults =
+    workflowState.phase !== 'idle' && (workflowState.phase !== 'error' || Boolean(workflowState.analysis))
   const isSuccess = workflowState.phase === 'success'
   const isSkipped = workflowState.phase === 'skipped'
   const isError = workflowState.phase === 'error'
@@ -40,6 +41,46 @@ export function AnalyzePage({
   const aiSummary = workflowState.analysis?.summary || ''
   const txId = workflowState.txId || ''
   const explorerLink = workflowState.explorerUrl || ''
+  const safeBudget = Number.isFinite(Number(taskBudget)) ? Number(taskBudget).toFixed(2) : taskBudget
+
+  const getQualityFromScore = (value) => {
+    if (value === null) {
+      return {
+        label: 'Not evaluated yet',
+        detail: 'Run AI Score to get a quality assessment for this task.',
+      }
+    }
+
+    if (value >= 90) {
+      return {
+        label: 'Excellent',
+        detail: 'High confidence task quality with strong execution readiness.',
+      }
+    }
+
+    if (value >= 75) {
+      return {
+        label: 'Good',
+        detail: 'Task quality is strong enough to pass threshold and proceed to payment.',
+      }
+    }
+
+    if (value >= 60) {
+      return {
+        label: 'Fair',
+        detail: 'Task is acceptable but needs improvements to consistently pass threshold.',
+      }
+    }
+
+    return {
+      label: 'Needs improvement',
+      detail: 'Task quality is currently too weak and is likely to fail threshold checks.',
+    }
+  }
+
+  const quality = getQualityFromScore(score)
+
+  const taskUnderstanding = `Task "${taskTitle}" is categorized as ${taskType} with a reward budget of ${safeBudget} ALGO. The workflow evaluates this task for quality and payout eligibility against threshold ${threshold}.`
 
   const handleRun = async () => {
     await onRunWorkflow()
@@ -218,6 +259,20 @@ export function AnalyzePage({
                   </div>
 
                   {/* AI Summary */}
+                  {(taskTitle || taskType || taskBudget) && (
+                    <div className="result-block">
+                      <span className="result-block-label">Task Understanding</span>
+                      <p className="result-summary-text">{taskUnderstanding}</p>
+                    </div>
+                  )}
+
+                  <div className="result-block">
+                    <span className="result-block-label">Task Quality</span>
+                    <p className="result-summary-text">
+                      <strong>{quality.label}</strong> {score !== null ? `(${score}/100).` : ''} {quality.detail}
+                    </p>
+                  </div>
+
                   {aiSummary && (
                     <div className="result-block">
                       <span className="result-block-label">AI Summary</span>
