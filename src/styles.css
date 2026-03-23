@@ -114,7 +114,9 @@ select {
 .section-head h2,
 .architecture-card strong,
 .meta-card strong,
-.contract-card strong {
+.contract-card strong,
+.workflow-score strong,
+.mini-card strong {
   display: block;
 }
 
@@ -380,6 +382,7 @@ select {
   align-content: center;
   justify-items: center;
   text-align: center;
+  overflow: hidden;
 }
 
 .architecture-icon {
@@ -410,6 +413,14 @@ select {
   height: 2px;
   background: linear-gradient(90deg, rgba(138, 146, 255, 0.2), rgba(138, 146, 255, 0.9));
   box-shadow: 0 0 14px rgba(123, 129, 255, 0.5);
+}
+
+.architecture-pulse {
+  position: absolute;
+  inset: -1px;
+  border-radius: 24px;
+  border: 1px solid rgba(151, 158, 255, 0.5);
+  pointer-events: none;
 }
 
 .accent-blue {
@@ -578,6 +589,16 @@ select {
   padding: 20px;
 }
 
+.workflow-score {
+  display: grid;
+  gap: 4px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(124, 136, 179, 0.14);
+  background: rgba(9, 15, 28, 0.88);
+}
+
 .assignment-label {
   color: #9aa6cb;
   text-transform: uppercase;
@@ -624,6 +645,10 @@ select {
     rgba(13, 20, 36, 0.9);
 }
 
+.result-card {
+  min-height: 140px;
+}
+
 .reputation-score strong {
   font-size: 4rem;
   line-height: 1;
@@ -651,6 +676,10 @@ select {
 .contract-card strong {
   margin: 10px 0 12px;
   font-size: 1.06rem;
+  overflow-wrap: anywhere;
+}
+
+.long-value {
   overflow-wrap: anywhere;
 }
 

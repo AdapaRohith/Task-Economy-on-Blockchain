@@ -2,4 +2,7 @@ node_modules/
 dist/
 vite-dev.log
 vite-dev.err.log
+.env
+.server.log
+.server.err.log
 .DS_Store
