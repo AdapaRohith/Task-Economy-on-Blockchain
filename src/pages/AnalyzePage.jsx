@@ -28,9 +28,12 @@ export function AnalyzePage({
   workflowState,
   threshold,
   onRunWorkflow,
+  onPayWorkflow,
 }) {
   const resultsRef = useRef(null)
-  const isProcessing = workflowState.phase === 'scoring'
+  const isScoring = workflowState.phase === 'scoring'
+  const isPaying = workflowState.phase === 'paying'
+  const isProcessing = isScoring || isPaying
   const hasResults =
     workflowState.phase !== 'idle' && (workflowState.phase !== 'error' || Boolean(workflowState.analysis))
   const isSuccess = workflowState.phase === 'success'
@@ -44,11 +47,18 @@ export function AnalyzePage({
   const analysisFactors = Array.isArray(workflowState.analysis?.factors)
     ? workflowState.analysis.factors.filter(Boolean)
     : []
+  const normalizedSummary = aiSummary.trim().toLowerCase()
+  const normalizedReason = decisionReason.trim().toLowerCase()
+  const showDecisionReason =
+    Boolean(decisionReason) &&
+    normalizedReason !== normalizedSummary &&
+    !normalizedSummary.includes(normalizedReason)
   const txId = workflowState.txId || ''
   const explorerLink = txId
     ? `${API.explorerBase}${encodeURIComponent(String(txId).trim())}`
     : workflowState.explorerUrl || ''
   const safeBudget = Number.isFinite(Number(taskBudget)) ? Number(taskBudget).toFixed(2) : taskBudget
+  const canPreparePayment = scorePasses && !txId
 
   const getQualityFromScore = (value) => {
     if (value === null) {
@@ -68,7 +78,7 @@ export function AnalyzePage({
     if (value >= 75) {
       return {
         label: 'Good',
-        detail: 'Task quality is strong enough to pass threshold and proceed to payment.',
+        detail: 'Task quality is strong enough for the user to consider payment.',
       }
     }
 
@@ -96,6 +106,13 @@ export function AnalyzePage({
     }, 300)
   }
 
+  const handlePay = async () => {
+    await onPayWorkflow()
+    setTimeout(() => {
+      resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 300)
+  }
+
   const handleVerify = () => {
     if (!explorerLink) return
     window.open(explorerLink, '_blank', 'noreferrer')
@@ -118,9 +135,9 @@ export function AnalyzePage({
           </div>
           <h2>Fill in the task details and run the AI score</h2>
           <p className="analyze-form-subtitle">
-            Once submitted, the data is forwarded to n8n for scoring. When the score
-            passes the threshold of <strong>{threshold}</strong>, payment is executed
-            on Algorand Testnet.
+            Submit the task details to n8n for scoring first. If the score passes
+            <strong> {threshold}</strong>, you can then choose whether to pay by adding
+            a receiver address.
           </p>
         </div>
 
@@ -166,19 +183,6 @@ export function AnalyzePage({
               </select>
             </label>
 
-            <label className="analyze-label full-width">
-              <span>Receiver Algorand Address</span>
-              <div className="analyze-input-icon-wrap">
-                <Wallet size={15} className="analyze-input-icon" />
-                <input
-                  className="analyze-input with-icon"
-                  value={receiverAddress}
-                  onChange={(e) => setReceiverAddress(e.target.value)}
-                  placeholder="Paste Algorand Testnet address here…"
-                  disabled={isProcessing}
-                />
-              </div>
-            </label>
           </div>
 
           {/* Error state */}
@@ -203,7 +207,7 @@ export function AnalyzePage({
             whileHover={!isProcessing ? { y: -2, scale: 1.01 } : {}}
             whileTap={!isProcessing ? { scale: 0.99 } : {}}
           >
-            {isProcessing ? (
+            {isScoring ? (
               <>
                 <Loader2 size={18} className="spin-icon" />
                 Running AI score…
@@ -215,6 +219,42 @@ export function AnalyzePage({
               </>
             )}
           </motion.button>
+
+          {canPreparePayment && (
+            <div className="result-block">
+              <span className="result-block-label">Receiver Algorand Address</span>
+              <div className="analyze-input-icon-wrap">
+                <Wallet size={15} className="analyze-input-icon" />
+                <input
+                  className="analyze-input with-icon"
+                  value={receiverAddress}
+                  onChange={(e) => setReceiverAddress(e.target.value)}
+                  placeholder="Paste Algorand Testnet address here…"
+                  disabled={isProcessing}
+                />
+              </div>
+
+              <motion.button
+                className={`analyze-run-btn${isPaying ? ' is-processing' : ''}`}
+                onClick={handlePay}
+                disabled={isProcessing}
+                whileHover={!isProcessing ? { y: -2, scale: 1.01 } : {}}
+                whileTap={!isProcessing ? { scale: 0.99 } : {}}
+              >
+                {isPaying ? (
+                  <>
+                    <Loader2 size={18} className="spin-icon" />
+                    Sending payment…
+                  </>
+                ) : (
+                  <>
+                    <Wallet size={18} />
+                    Pay Through Algorand
+                  </>
+                )}
+              </motion.button>
+            </div>
+          )}
         </div>
       </motion.section>
 
@@ -254,7 +294,7 @@ export function AnalyzePage({
                     <div className="score-meta">
                       <div className={`score-verdict${scorePasses ? ' verdict-pass' : ' verdict-fail'}`}>
                         {scorePasses ? (
-                          <><CheckCircle2 size={16} /> Threshold passed — payment executed</>
+                          <><CheckCircle2 size={16} /> Threshold passed — payment is available</>
                         ) : (
                           <><XCircle size={16} /> Below threshold — payment skipped</>
                         )}
@@ -264,6 +304,15 @@ export function AnalyzePage({
                       </p>
                     </div>
                   </div>
+
+                  {aiSummary && (
+                    <div className={`summary-highlight${scorePasses ? ' summary-highlight-pass' : ' summary-highlight-fail'}`}>
+                      <span className="summary-highlight-label">
+                        {scorePasses ? 'Payment Recommendation' : 'Do Not Pay Recommendation'}
+                      </span>
+                      <p className="summary-highlight-text">{aiSummary}</p>
+                    </div>
+                  )}
 
                   {/* AI Summary */}
                   {(taskTitle || taskType || taskBudget) && (
@@ -280,14 +329,7 @@ export function AnalyzePage({
                     </p>
                   </div>
 
-                  {aiSummary && (
-                    <div className="result-block">
-                      <span className="result-block-label">AI Summary</span>
-                      <p className="result-summary-text">{aiSummary}</p>
-                    </div>
-                  )}
-
-                  {decisionReason && (
+                  {showDecisionReason && (
                     <div className="result-block">
                       <span className="result-block-label">Decision Reason</span>
                       <p className="result-summary-text">{decisionReason}</p>

@@ -10,6 +10,8 @@ import { API } from './config'
 
 const threshold = 75
 const storageKey = 'task-economy-on-blockchain-state-v2'
+const placeholderReceiverAddress = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5HFKQ'
+const defaultReceiverAddress = 'YHEIT7IPD0TG6XHO6AHR57RX57REYRUIPKVGOJ54DDMBP2PAV6A5NQJZ4Q'
 
 const initialTasks = []
 
@@ -51,20 +53,48 @@ const loadPersistedState = () => {
   }
 }
 
+const sanitizeWorkflowState = (workflowState) => {
+  if (!workflowState || typeof workflowState !== 'object') {
+    return null
+  }
+
+  const staleShouldPayError =
+    workflowState.phase === 'error' &&
+    String(workflowState.message || '').includes('boolean should_pay field')
+
+  if (staleShouldPayError) {
+    return {
+      phase: 'idle',
+      message: 'Waiting for a task submission and AI score.',
+      taskId: '',
+      score: null,
+      txId: '',
+      explorerUrl: '',
+      skipped: false,
+      note: null,
+      analysis: null,
+    }
+  }
+
+  return workflowState
+}
+
 function App() {
   const location = useLocation()
   const isLandingPage = location.pathname === '/'
   const persistedState = loadPersistedState()
+  const persistedWorkflowState = sanitizeWorkflowState(persistedState?.workflowState)
   const [selectedStackItemId, setSelectedStackItemId] = useState(persistedState?.selectedStackItemId || 'algosdk')
   const [tasks, setTasks] = useState(sanitizeTasks(persistedState?.tasks) || initialTasks)
   const [taskTitle, setTaskTitle] = useState(persistedState?.taskTitle || 'Trigger Algorand-native payment after AI evaluation')
   const [taskBudget, setTaskBudget] = useState(persistedState?.taskBudget || '0.10')
   const [taskType, setTaskType] = useState(persistedState?.taskType || 'Code Review')
-  const [receiverAddress, setReceiverAddress] = useState(persistedState?.receiverAddress || '')
+  const [receiverAddress, setReceiverAddress] = useState(persistedState?.receiverAddress || defaultReceiverAddress)
   const [workflowState, setWorkflowState] = useState(
-    persistedState?.workflowState || {
+    persistedWorkflowState || {
       phase: 'idle',
       message: 'Waiting for a task submission and AI score.',
+      taskId: '',
       score: null,
       txId: '',
       explorerUrl: '',
@@ -94,24 +124,11 @@ function App() {
   }, [receiverAddress, selectedStackItemId, taskBudget, taskTitle, taskType, tasks, workflowState])
 
   const handleRunWorkflow = async () => {
-    if (!receiverAddress.trim()) {
-      setWorkflowState({
-        phase: 'error',
-        message: 'Paste a valid Algorand Testnet receiver address before running the payment flow.',
-        score: null,
-        txId: '',
-        explorerUrl: '',
-        skipped: false,
-        note: null,
-        analysis: null,
-      })
-      return
-    }
-
     const taskId = `TASK-${2403 + tasks.length}`
     setWorkflowState({
       phase: 'scoring',
-      message: 'Requesting backend AI analysis before payment execution.',
+      message: 'Requesting backend AI analysis.',
+      taskId,
       score: null,
       txId: '',
       explorerUrl: '',
@@ -131,7 +148,7 @@ function App() {
           taskTitle,
           taskType,
           taskBudget: Number(taskBudget),
-          receiverAddress: receiverAddress.trim(),
+          receiverAddress: placeholderReceiverAddress,
         }),
       })
 
@@ -145,6 +162,7 @@ function App() {
       setWorkflowState({
         phase: 'error',
         message: error.message,
+        taskId,
         score: null,
         txId: '',
         explorerUrl: '',
@@ -158,14 +176,18 @@ function App() {
     const score = Number(analysis.score ?? 0)
     const status = analysis.status === 'completed' ? 'completed' : 'failed'
     const notePreview = { taskId, score, status }
+    const passedThreshold = score >= threshold
 
     setWorkflowState({
-      phase: 'scoring',
-      message: `${analysis.summary} Evaluating threshold gate before payment execution.`,
+      phase: passedThreshold ? 'awaiting_payment' : 'skipped',
+      message: passedThreshold
+        ? 'AI recommends payment. Add a receiver Algorand address if you want to continue.'
+        : 'Threshold not met. Review the AI reasoning before deciding whether to refine and resubmit the task.',
+      taskId,
       score,
       txId: '',
       explorerUrl: '',
-      skipped: false,
+      skipped: !passedThreshold,
       note: notePreview,
       analysis,
     })
@@ -175,14 +197,41 @@ function App() {
       title: taskTitle,
       type: taskType,
       budget: `${taskBudget} ALGO`,
-      status: 'In Review',
-      rewardTx: 'Awaiting /api/pay response',
+      status: passedThreshold ? 'Awaiting Payment' : 'Open',
+      rewardTx: passedThreshold ? 'Awaiting receiver address' : 'No transaction',
       proofHash: JSON.stringify(notePreview),
-      verification: analysis.summary,
+      verification: passedThreshold
+        ? `${analysis.summary} Waiting for the user to confirm payment with a receiver address.`
+        : analysis.summary,
       analysis,
     }
 
     setTasks((current) => [pendingTask, ...current])
+  }
+
+  const handlePayWorkflow = async () => {
+    if (!receiverAddress.trim()) {
+      setWorkflowState((current) => ({
+        ...current,
+        phase: 'error',
+        message: 'Paste a valid Algorand Testnet receiver address before sending payment.',
+      }))
+      return
+    }
+
+    const taskId = workflowState.taskId || `TASK-${2403 + tasks.length}`
+    const score = Number(workflowState.score ?? 0)
+    const status = workflowState.analysis?.status === 'completed' ? 'completed' : 'failed'
+    const notePreview = { taskId, score, status }
+    const analysis = workflowState.analysis
+
+    setWorkflowState((current) => ({
+      ...current,
+      phase: 'paying',
+      message: 'Submitting Algorand payment.',
+      taskId,
+      note: notePreview,
+    }))
 
     try {
       const response = await fetch(API.pay, {
@@ -208,6 +257,7 @@ function App() {
         setWorkflowState({
           phase: 'skipped',
           message: data.message,
+          taskId,
           score,
           txId: '',
           explorerUrl: '',
@@ -220,12 +270,12 @@ function App() {
           current.map((task) =>
             task.id === taskId
               ? {
-                  ...task,
-                  status: 'Open',
-                  rewardTx: 'No transaction',
-                  verification: data.message,
-                }
-              : task,
+                ...task,
+                status: 'Open',
+                rewardTx: 'No transaction',
+                verification: `${analysis?.summary || ''} ${data.message}`.trim(),
+              }
+            : task,
           ),
         )
         return
@@ -234,6 +284,7 @@ function App() {
       setWorkflowState({
         phase: 'success',
         message: `Payment confirmed on Algorand Testnet in round ${data.confirmedRound}.`,
+        taskId,
         score,
         txId: data.transactionId,
         explorerUrl: data.explorerUrl,
@@ -259,6 +310,7 @@ function App() {
       setWorkflowState({
         phase: 'error',
         message: error.message,
+        taskId,
         score,
         txId: '',
         explorerUrl: '',
@@ -272,7 +324,7 @@ function App() {
           task.id === taskId
             ? {
                 ...task,
-                status: 'Open',
+                status: 'Awaiting Payment',
                 rewardTx: 'Failed',
                 verification: error.message,
               }
@@ -312,6 +364,7 @@ function App() {
                 workflowState={workflowState}
                 threshold={threshold}
                 onRunWorkflow={handleRunWorkflow}
+                onPayWorkflow={handlePayWorkflow}
               />
             }
           />

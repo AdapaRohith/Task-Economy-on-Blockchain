@@ -83,6 +83,38 @@ const buildAnalyzePayload = ({ taskTitle, taskType, taskBudget, receiverAddress 
   receiverAddress: String(receiverAddress || '').trim(),
 })
 
+const getDemoAnalysis = ({ taskTitle }) => {
+  const normalizedTitle = String(taskTitle || '').trim().toLowerCase()
+
+  if (normalizedTitle === 'check errors in console') {
+    return {
+      score: 55,
+      status: 'failed',
+      decision: 'skip',
+      verdict: 'Threshold not met',
+      decisionReason: 'This task is too vague and does not clearly describe business impact or a verifiable delivery outcome.',
+      summary: 'AI decision: DO NOT PAY. This task is too vague to justify payment because it only mentions checking console errors without a clear impact, scope, or measurable result. Score 55/100.',
+      factors: ['Vague scope', 'Low delivery clarity', 'Weak verifiability'],
+      source: 'demo-analysis',
+    }
+  }
+
+  if (normalizedTitle === 'implement blockchain to the hiring team') {
+    return {
+      score: 80,
+      status: 'completed',
+      decision: 'pay',
+      verdict: 'Threshold passed',
+      decisionReason: 'This task has stronger strategic value and suggests meaningful implementation work with clear organizational impact.',
+      summary: 'AI decision: PAY. This is a strong task with meaningful implementation value and enough potential impact to justify payment. Score 80/100.',
+      factors: ['Stronger business value', 'Implementation-focused work', 'Clearer impact signal'],
+      source: 'demo-analysis',
+    }
+  }
+
+  return null
+}
+
 const normalizeAnalysis = (rawAnalysis) => {
   const score = clamp(Number(rawAnalysis?.score || 0), 0, 100)
   const status = score >= paymentThreshold ? 'completed' : 'failed'
@@ -162,6 +194,13 @@ const decodeNote = (noteValue) => {
   }
 }
 
+const toJsonSafe = (value) =>
+  JSON.parse(
+    JSON.stringify(value, (_key, nestedValue) =>
+      typeof nestedValue === 'bigint' ? Number(nestedValue) : nestedValue,
+    ),
+  )
+
 const getPlatformAccount = async () => {
   const mnemonic = process.env[`${senderEnvAccount}_MNEMONIC`] || process.env.ALGOD_MNEMONIC
   if (!mnemonic) {
@@ -219,6 +258,15 @@ app.post('/api/analyze', async (req, res) => {
   }
 
   try {
+    const demoAnalysis = getDemoAnalysis({ taskTitle })
+    if (demoAnalysis) {
+      return res.json({
+        ok: true,
+        analysis: demoAnalysis,
+        threshold: paymentThreshold,
+      })
+    }
+
     if (n8nAnalyzeWebhookUrl) {
       const n8nPayload = buildAnalyzePayload({ taskTitle, taskType, taskBudget, receiverAddress })
       const n8nResponse = await callN8nWebhook(
@@ -493,7 +541,7 @@ app.get('/api/verify/:txId', async (req, res) => {
       amountMicroAlgos: payment.amount ?? null,
       noteText: note?.text ?? '',
       noteJson: note?.json ?? null,
-      transaction,
+      transaction: toJsonSafe(transaction),
     })
   } catch (error) {
     return res.status(500).json({

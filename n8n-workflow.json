@@ -1,5 +1,5 @@
 {
-  "name": "Task Economy Decision and Payment",
+  "name": "Task Analyze Only",
   "nodes": [
     {
       "parameters": {
@@ -9,26 +9,20 @@
         "options": {}
       },
       "id": "webhook-analyze",
-      "name": "Analyze Webhook",
+      "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1.1,
-      "position": [
-        160,
-        220
-      ]
+      "position": [160, 300]
     },
     {
       "parameters": {
-        "jsCode": "const body = $input.first().json.body || $input.first().json || {};\nconst THRESHOLD = 75;\nconst ALGO_ADDRESS_REGEX = /^[A-Z2-7]{58}$/;\n\nif (!body.taskTitle || !body.taskType || !body.receiverAddress) {\n  return [{ json: { ok: false, message: 'taskTitle, taskType, and receiverAddress are required.' } }];\n}\n\nif (!ALGO_ADDRESS_REGEX.test(String(body.receiverAddress).trim())) {\n  return [{ json: { ok: false, message: 'receiverAddress must be a valid Algorand address.' } }];\n}\n\nconst normalized = {\n  taskTitle: String(body.taskTitle).trim(),\n  taskType: String(body.taskType).trim(),\n  taskBudget: Number(body.taskBudget || 0),\n  receiverAddress: String(body.receiverAddress).trim(),\n};\n\nreturn [{\n  json: {\n    ...normalized,\n    threshold: THRESHOLD,\n    prompt: `You are a professional payout decision maker for a blockchain task marketplace.\\n\\nYour job is to decide whether a submitted task is worth paying for. Evaluate the task as a disciplined operations and delivery reviewer. Focus on:\\n- business value\\n- impact\\n- execution complexity\\n- clarity of deliverables\\n- ease of verification\\n- whether the payout appears justified\\n\\nReturn STRICT JSON only with these keys:\\n- should_pay (boolean)\\n- score (number from 0 to 100)\\n- reason (string)\\n- summary (string)\\n- factors (array of short strings)\\n\\nRules:\\n- If should_pay is true, score must be >= ${THRESHOLD}.\\n- If should_pay is false, score must be < ${THRESHOLD}.\\n- The summary must explicitly say PAY or DO NOT PAY.\\n- Be decisive and professional, not vague.\\n\\nTask title: ${normalized.taskTitle}\\nTask type: ${normalized.taskType}\\nBudget ALGO: ${normalized.taskBudget}\\nReceiver address: ${normalized.receiverAddress}`\n  }\n}];"
+        "jsCode": "const body = $input.first().json.body || $input.first().json || {};\nconst THRESHOLD = 75;\nconst ALGO_ADDRESS_REGEX = /^[A-Z2-7]{58}$/;\n\nif (!body.taskTitle || !body.taskType || !body.receiverAddress) {\n  return [{ json: { ok: false, message: 'taskTitle, taskType, and receiverAddress are required.' } }];\n}\n\nif (!ALGO_ADDRESS_REGEX.test(String(body.receiverAddress).trim())) {\n  return [{ json: { ok: false, message: 'receiverAddress must be a valid Algorand address.' } }];\n}\n\nconst taskTitle = String(body.taskTitle).trim();\nconst taskType = String(body.taskType).trim();\nconst taskBudget = Number(body.taskBudget || 0);\nconst receiverAddress = String(body.receiverAddress).trim();\n\nreturn [{\n  json: {\n    taskTitle,\n    taskType,\n    taskBudget,\n    receiverAddress,\n    threshold: THRESHOLD,\n    prompt: `You are a professional decision maker for a blockchain task marketplace. Decide whether the submitted task is worth paying for.\\n\\nReturn STRICT JSON only with these keys:\\n- should_pay (boolean)\\n- score (number from 0 to 100)\\n- reason (string)\\n- summary (string)\\n\\nDecision criteria:\\n- Strong reasons to PAY: high business impact, security-sensitive work, measurable delivery, clearly verifiable outcome, direct effect on core product or payment reliability.\\n- Strong reasons to DO NOT PAY: vague maintenance work, unclear value, weak ownership, low verifiability, generic cleanup, cosmetic-only tasks, or tasks described too loosely to prove meaningful impact.\\n- Tasks like 'fixing errors in console', 'minor cleanup', or similar generic debugging should usually be DO NOT PAY unless the prompt clearly explains a serious user-facing bug, production impact, or a specific verifiable result.\\n- If the task description is vague, generic, or lacks a clearly verifiable outcome, you should decide DO NOT PAY and explain that the task is too vague to justify payment.\\n\\nRules:\\n- If should_pay is true, score must be >= ${THRESHOLD}.\\n- If should_pay is false, score must be < ${THRESHOLD}.\\n- Summary must clearly say PAY or DO NOT PAY.\\n- Be decisive and concise.\\n\\nTask title: ${taskTitle}\\nTask type: ${taskType}\\nBudget ALGO: ${taskBudget}\\nReceiver address: ${receiverAddress}`\n  }\n}];"
       },
-      "id": "prepare-analyze",
-      "name": "Analyze Input",
+      "id": "prepare-input",
+      "name": "Code",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        420,
-        220
-      ]
+      "position": [420, 300]
     },
     {
       "parameters": {
@@ -42,7 +36,7 @@
           "values": [
             {
               "role": "system",
-              "content": "You are a strict professional payout-decision reviewer for Algorand task payments. Return JSON only."
+              "content": "You are a strict payout decision reviewer. Return JSON only."
             },
             {
               "role": "user",
@@ -53,13 +47,10 @@
         "options": {}
       },
       "id": "message-model",
-      "name": "Message a model",
+      "name": "OpenAI",
       "type": "@n8n/n8n-nodes-langchain.openAi",
       "typeVersion": 1.8,
-      "position": [
-        690,
-        220
-      ],
+      "position": [690, 300],
       "credentials": {
         "openAiApi": {
           "id": "replace-openai-credential-id",
@@ -69,16 +60,13 @@
     },
     {
       "parameters": {
-        "jsCode": "const THRESHOLD = 75;\nconst incoming = $('Analyze Input').first().json || {};\nconst raw = $input.first().json.text || $input.first().json.response || $input.first().json.output || $input.first().json.message || '{}';\n\nlet parsed;\ntry {\n  parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;\n} catch {\n  return [{ json: { ok: false, message: 'Model returned invalid JSON.' } }];\n}\n\nlet score = Number(parsed.score);\nconst shouldPay = parsed.should_pay === true;\nif (!Number.isFinite(score)) {\n  score = shouldPay ? THRESHOLD + 5 : THRESHOLD - 5;\n}\n\nscore = Math.max(0, Math.min(100, score));\nif (shouldPay && score < THRESHOLD) score = THRESHOLD;\nif (!shouldPay && score >= THRESHOLD) score = THRESHOLD - 1;\n\nconst status = score > THRESHOLD ? 'completed' : (score === THRESHOLD ? 'completed' : 'failed');\nconst decision = status === 'completed' ? 'pay' : 'skip';\nconst decisionReason = String(parsed.reason || '').trim() || (status === 'completed'\n  ? 'AI judged this task valuable enough to justify payment.'\n  : 'AI judged this task insufficiently valuable or verifiable for payment.');\nconst summary = String(parsed.summary || '').trim() || (status === 'completed'\n  ? `AI decision: PAY. ${decisionReason} Score ${score}/100 (threshold ${THRESHOLD}).`\n  : `AI decision: DO NOT PAY. ${decisionReason} Score ${score}/100 (threshold ${THRESHOLD}).`);\nconst factors = Array.isArray(parsed.factors)\n  ? parsed.factors.map((item) => String(item)).filter(Boolean).slice(0, 6)\n  : [];\n\nreturn [{\n  json: {\n    ok: true,\n    analysis: {\n      score,\n      status,\n      decision,\n      verdict: status === 'completed' ? 'Threshold passed' : 'Threshold not met',\n      decisionReason,\n      summary,\n      factors,\n      source: 'n8n-openai',\n      taskTitle: incoming.taskTitle,\n      taskType: incoming.taskType,\n      taskBudget: incoming.taskBudget,\n      receiverAddress: incoming.receiverAddress\n    }\n  }\n}];"
+        "jsCode": "const THRESHOLD = 75;\nconst raw = $input.first().json.text || $input.first().json.response || $input.first().json.output || $input.first().json.message || '{}';\n\nlet parsed;\ntry {\n  parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;\n} catch {\n  return [{ json: { ok: false, message: 'Model returned invalid JSON. Ensure the OpenAI node returns JSON with at least score and summary.' } }];\n}\n\nconst score = Number(parsed.score);\nif (!Number.isFinite(score)) {\n  return [{ json: { ok: false, message: 'Model output is missing a numeric score field.' } }];\n}\n\nconst normalizedScore = Math.max(0, Math.min(100, score));\nconst shouldPay = typeof parsed.should_pay === 'boolean'\n  ? parsed.should_pay\n  : normalizedScore >= THRESHOLD;\n\nif (typeof parsed.should_pay === 'boolean') {\n  if (shouldPay === true && normalizedScore < THRESHOLD) {\n    return [{ json: { ok: false, message: `Model output is inconsistent: should_pay=true but score=${normalizedScore} is below threshold ${THRESHOLD}.` } }];\n  }\n\n  if (shouldPay === false && normalizedScore >= THRESHOLD) {\n    return [{ json: { ok: false, message: `Model output is inconsistent: should_pay=false but score=${normalizedScore} meets or exceeds threshold ${THRESHOLD}.` } }];\n  }\n}\n\nconst status = normalizedScore >= THRESHOLD ? 'completed' : 'failed';\nconst decisionReason = String(parsed.reason || '').trim() || (status === 'completed'\n  ? 'The task appears strong enough to justify payment.'\n  : 'The task does not appear strong enough to justify payment.');\nconst summary = String(parsed.summary || '').trim();\n\nif (!summary) {\n  return [{ json: { ok: false, message: 'Model output is missing a summary field.' } }];\n}\n\nreturn [{\n  json: {\n    ok: true,\n    analysis: {\n      score: normalizedScore,\n      status,\n      decision: shouldPay ? 'pay' : 'skip',\n      verdict: status === 'completed' ? 'Threshold passed' : 'Threshold not met',\n      decisionReason,\n      summary,\n      source: 'n8n-openai'\n    }\n  }\n}];"
       },
-      "id": "build-analyze-response",
-      "name": "Build Analyze Response",
+      "id": "build-response",
+      "name": "Code Output",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        960,
-        220
-      ]
+      "position": [960, 300]
     },
     {
       "parameters": {
@@ -88,187 +76,52 @@
           "responseCode": "={{ $json.ok ? 200 : 400 }}"
         }
       },
-      "id": "respond-analyze",
-      "name": "Respond Analyze",
+      "id": "respond-webhook",
+      "name": "Respond",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [
-        1220,
-        220
-      ]
-    },
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "pay",
-        "responseMode": "responseNode",
-        "options": {}
-      },
-      "id": "webhook-pay",
-      "name": "Pay Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 1.1,
-      "position": [
-        160,
-        560
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const body = $input.first().json.body || $input.first().json || {};\nconst THRESHOLD = 75;\n\nif (!body.taskId || !body.receiver || body.score === undefined) {\n  return [{ json: { ok: false, message: 'taskId, receiver, and score are required.' } }];\n}\n\nif (Number(body.score) < THRESHOLD || body.status !== 'completed') {\n  return [{\n    json: {\n      ok: true,\n      skipped: true,\n      message: Number(body.score) < THRESHOLD\n        ? `Score ${body.score} is below the payment threshold of ${THRESHOLD}. Payment declined.`\n        : 'Task status is not completed. Payment declined.',\n      note: {\n        taskId: String(body.taskId),\n        score: Number(body.score),\n        status: String(body.status || 'failed'),\n      },\n      receiverAddress: String(body.receiver).trim(),\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    taskId: String(body.taskId),\n    receiver: String(body.receiver).trim(),\n    score: Number(body.score),\n    status: String(body.status),\n    amountAlgo: Number(body.amountAlgo || 0.1),\n  }\n}];"
-      },
-      "id": "payment-gate",
-      "name": "Payment Gate",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        420,
-        560
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $env.ALGORAND_PAY_SERVICE_URL }}/internal/algorand-pay",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json) }}",
-        "options": {
-          "timeout": 30000
-        }
-      },
-      "id": "call-algorand-pay",
-      "name": "Call Algorand API",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        700,
-        560
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const paymentGate = $('Payment Gate').first().json || {};\nconst service = $input.first().json || {};\n\nif (paymentGate.skipped) {\n  return [{ json: paymentGate }];\n}\n\nif (service.skipped) {\n  return [{\n    json: {\n      ok: true,\n      skipped: true,\n      message: service.message || 'Payment declined.',\n      note: service.note || {\n        taskId: paymentGate.taskId,\n        score: paymentGate.score,\n        status: paymentGate.status,\n      },\n      receiverAddress: service.receiverAddress || paymentGate.receiver,\n    }\n  }];\n}\n\nconst txId = service.transactionId || service.txId || '';\nif (!txId) {\n  return [{\n    json: {\n      ok: false,\n      message: service.message || 'Algorand API did not return a transaction id.',\n      serviceResponse: service,\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    ok: true,\n    skipped: false,\n    transactionId: txId,\n    explorerUrl: service.explorerUrl || `https://testnet.explorer.perawallet.app/tx/${txId}`,\n    confirmedRound: service.confirmedRound || service.round || 0,\n    note: service.note || {\n      taskId: paymentGate.taskId,\n      score: paymentGate.score,\n      status: paymentGate.status,\n    },\n    receiverAddress: service.receiverAddress || paymentGate.receiver,\n  }\n}];"
-      },
-      "id": "build-pay-response",
-      "name": "Build Pay Response",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        960,
-        560
-      ]
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ $json }}",
-        "options": {
-          "responseCode": "={{ $json.ok ? 200 : 500 }}"
-        }
-      },
-      "id": "respond-pay",
-      "name": "Respond Pay",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [
-        1220,
-        560
-      ]
+      "position": [1220, 300]
     }
   ],
   "connections": {
-    "Analyze Webhook": {
+    "Webhook": {
       "main": [
         [
           {
-            "node": "Analyze Input",
+            "node": "Code",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Analyze Input": {
+    "Code": {
       "main": [
         [
           {
-            "node": "Message a model",
+            "node": "OpenAI",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Message a model": {
+    "OpenAI": {
       "main": [
         [
           {
-            "node": "Build Analyze Response",
+            "node": "Code Output",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Build Analyze Response": {
+    "Code Output": {
       "main": [
         [
           {
-            "node": "Respond Analyze",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Pay Webhook": {
-      "main": [
-        [
-          {
-            "node": "Payment Gate",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Payment Gate": {
-      "main": [
-        [
-          {
-            "node": "Call Algorand API",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Call Algorand API": {
-      "main": [
-        [
-          {
-            "node": "Build Pay Response",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Pay Response": {
-      "main": [
-        [
-          {
-            "node": "Respond Pay",
+            "node": "Respond",
             "type": "main",
             "index": 0
           }
@@ -287,10 +140,6 @@
     "templateCredsSetupCompleted": true,
     "n8nVersion": "1.0.0"
   },
-  "tags": [
-    "openai",
-    "algorand",
-    "task-economy"
-  ],
+  "tags": ["openai", "task-economy"],
   "active": true
 }

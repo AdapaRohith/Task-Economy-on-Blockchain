@@ -1701,6 +1701,51 @@ select {
   border-bottom: 1px solid rgba(124, 136, 179, 0.1);
 }
 
+.summary-highlight {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+  border-radius: 20px;
+  border: 1px solid transparent;
+  margin-bottom: 18px;
+}
+
+.summary-highlight-pass {
+  background: linear-gradient(160deg, rgba(22, 80, 56, 0.9), rgba(14, 54, 38, 0.72));
+  border-color: rgba(40, 200, 140, 0.28);
+  box-shadow: 0 0 32px rgba(40, 200, 140, 0.1);
+}
+
+.summary-highlight-fail {
+  background: linear-gradient(160deg, rgba(70, 22, 22, 0.9), rgba(50, 14, 14, 0.72));
+  border-color: rgba(220, 80, 80, 0.28);
+  box-shadow: 0 0 32px rgba(220, 80, 80, 0.1);
+}
+
+.summary-highlight-label {
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.summary-highlight-pass .summary-highlight-label,
+.summary-highlight-pass .summary-highlight-text {
+  color: #78f2ba;
+}
+
+.summary-highlight-fail .summary-highlight-label,
+.summary-highlight-fail .summary-highlight-text {
+  color: #ff9d9d;
+}
+
+.summary-highlight-text {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
 .result-block-label {
   font-size: 0.74rem;
   font-weight: 700;
