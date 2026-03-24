@@ -96,6 +96,98 @@ select {
   gap: 28px;
 }
 
+.landing-page {
+  position: relative;
+  min-height: calc(100vh - 80px);
+  place-items: center;
+}
+
+.landing-actions {
+  display: flex;
+  position: relative;
+  z-index: 2;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.landing-problem-statement {
+  margin: 0 0 10px;
+  max-width: min(760px, 92vw);
+  text-align: center;
+  color: #f4f7ff;
+  font-size: clamp(1.5rem, 3.8vw, 2.35rem);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 26px rgba(115, 122, 255, 0.24);
+}
+
+.landing-actions .primary-action,
+.landing-actions .secondary-action {
+  width: min(360px, 86vw);
+  min-height: 68px;
+  border-radius: 22px;
+  font-size: 1.18rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 16px 36px rgba(5, 10, 24, 0.45);
+}
+
+.landing-actions .primary-action {
+  color: #ffffff;
+  background: linear-gradient(135deg, #6b63ff, #8757ff);
+}
+
+.landing-actions .secondary-action {
+  color: #ffffff;
+  background: linear-gradient(135deg, #26b99e, #2f8fff);
+}
+
+.landing-actions .primary-action:hover,
+.landing-actions .secondary-action:hover {
+  transform: translateY(-3px) scale(1.01);
+}
+
+.landing-aurora {
+  position: absolute;
+  inset: 12% 14%;
+  border-radius: 999px;
+  background: linear-gradient(120deg, rgba(108, 99, 255, 0.2), rgba(38, 185, 158, 0.16), rgba(139, 95, 255, 0.2));
+  background-size: 220% 220%;
+  filter: blur(80px);
+  opacity: 0.7;
+  animation: gradient-rotate 8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.landing-orbit {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(90px);
+  opacity: 0.32;
+  pointer-events: none;
+  animation: float-orbit 8s ease-in-out infinite;
+}
+
+.landing-orbit-a {
+  top: 16%;
+  left: 18%;
+  width: 220px;
+  height: 220px;
+  background: rgba(110, 99, 255, 0.35);
+}
+
+.landing-orbit-b {
+  right: 16%;
+  bottom: 14%;
+  width: 260px;
+  height: 260px;
+  background: rgba(40, 191, 164, 0.24);
+  animation-delay: 1.8s;
+}
+
 .analysis-nav {
   border-radius: 28px;
   padding: 24px;

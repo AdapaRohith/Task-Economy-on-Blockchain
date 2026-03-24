@@ -4,6 +4,23 @@ import { Link2, Search, Wallet } from 'lucide-react'
 import { expectedFlow, proofSchema, receiverRules } from '../content'
 import { API } from '../config'
 
+const readJsonResponse = async (response, defaultMessage) => {
+  const rawText = await response.text()
+
+  if (!rawText || !rawText.trim()) {
+    if (!response.ok) {
+      throw new Error(`${defaultMessage} (HTTP ${response.status})`)
+    }
+    return {}
+  }
+
+  try {
+    return JSON.parse(rawText)
+  } catch {
+    throw new Error(`Service returned invalid JSON (HTTP ${response.status}).`)
+  }
+}
+
 export function VerifyPage({ workflowState, threshold }) {
   const [txId, setTxId] = useState(workflowState.txId || '')
   const [verificationState, setVerificationState] = useState({
@@ -32,9 +49,9 @@ export function VerifyPage({ workflowState, threshold }) {
       const response = await fetch(
         `${API.indexerBase}/v2/transactions/${encodeURIComponent(txId.trim())}`
       )
-      const raw = await response.json()
+      const raw = await readJsonResponse(response, 'Transaction lookup failed.')
       if (!response.ok || !raw.transaction) {
-        throw new Error(raw.message || 'Transaction not found on indexer.')
+        throw new Error(raw.message || `Transaction not found on indexer (HTTP ${response.status}).`)
       }
 
       const tx = raw.transaction

@@ -15,12 +15,12 @@ const indexerServer = process.env.INDEXER_SERVER || 'https://testnet-idx.algonod
 const indexerPort = process.env.INDEXER_PORT || ''
 const indexerToken = process.env.INDEXER_TOKEN || ''
 const paymentThreshold = Number(process.env.PAYMENT_THRESHOLD || 75)
-const paymentAmountAlgo = Number(process.env.DEMO_PAYMENT_ALGO || 0.1)
-const explorerBase = process.env.ALGOD_EXPLORER_BASE || 'https://testnet.algoexplorer.io/tx/'
+const paymentAmountAlgo = Number(process.env.PAYMENT_AMOUNT_ALGO || process.env.DEMO_PAYMENT_ALGO || 0.1)
+const explorerBase = process.env.ALGOD_EXPLORER_BASE || 'https://testnet.explorer.perawallet.app/tx/'
 const senderEnvAccount = process.env.PLATFORM_ACCOUNT_NAME || 'ALGOD'
-const openAiApiKey = process.env.OPENAI_API_KEY || ''
-const openAiBaseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'
-const openAiModel = process.env.OPENAI_MODEL || 'gpt-4o-mini'
+const n8nAnalyzeWebhookUrl = String(process.env.N8N_ANALYZE_WEBHOOK_URL || '').trim()
+const n8nPayWebhookUrl = String(process.env.N8N_PAY_WEBHOOK_URL || '').trim()
+const n8nRequestTimeoutMs = Number(process.env.N8N_REQUEST_TIMEOUT_MS || 30000)
 
 const algodClient = new algosdk.Algodv2(algodToken, algodServer, algodPort)
 const indexerClient = new algosdk.Indexer(indexerToken, indexerServer, indexerPort)
@@ -55,70 +55,93 @@ const buildLocalAnalysis = ({ taskTitle, taskType }) => {
   return {
     score: finalScore,
     status,
-    summary: `Local fallback analysis classified this ${taskType} task with score ${finalScore}.`,
+    summary: `Algorand task analysis classified this ${taskType} task with score ${finalScore}.`,
     verdict: status === 'completed' ? 'Threshold passed' : 'Threshold not met',
-    source: 'local-fallback',
+    source: 'algorand-local-analysis',
   }
 }
 
-const analyzeWithOpenAI = async ({ taskTitle, taskType, taskBudget, receiverAddress }) => {
-  const response = await fetch(`${openAiBaseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${openAiApiKey}`,
-    },
-    body: JSON.stringify({
-      model: openAiModel,
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'task_analysis',
-          schema: {
-            type: 'object',
-            properties: {
-              score: { type: 'number' },
-              status: { type: 'string', enum: ['completed', 'failed'] },
-              summary: { type: 'string' },
-              verdict: { type: 'string' },
-            },
-            required: ['score', 'status', 'summary', 'verdict'],
-            additionalProperties: false,
-          },
-        },
-      },
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You evaluate Algorand-native task execution requests for a hackathon demo. Return a practical score from 0 to 100 and whether the task should be completed or failed. Completed should only be used when the task is credible and well-formed enough to pass threshold review.',
-        },
-        {
-          role: 'user',
-          content: `Task title: ${taskTitle}\nTask type: ${taskType}\nBudget in ALGO: ${taskBudget}\nReceiver address: ${receiverAddress}\nThreshold: ${paymentThreshold}\nReturn JSON only.`,
-        },
-      ],
-    }),
-  })
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
 
-  if (!response.ok) {
-    throw new Error(`OpenAI analysis request failed with status ${response.status}`)
+const readJsonSafely = async (response) => {
+  const rawText = await response.text()
+  if (!rawText || !rawText.trim()) {
+    return {}
   }
 
-  const data = await response.json()
-  const content = data.choices?.[0]?.message?.content
-  if (!content) {
-    throw new Error('OpenAI analysis returned no content')
+  try {
+    return JSON.parse(rawText)
+  } catch {
+    throw new Error(`Upstream service returned invalid JSON (HTTP ${response.status}).`)
   }
+}
 
-  const parsed = JSON.parse(content)
+const buildAnalyzePayload = ({ taskTitle, taskType, taskBudget, receiverAddress }) => ({
+  taskTitle: String(taskTitle || '').trim(),
+  taskType: String(taskType || '').trim(),
+  taskBudget: Number(taskBudget || 0),
+  receiverAddress: String(receiverAddress || '').trim(),
+})
+
+const normalizeAnalysis = (rawAnalysis) => {
+  const score = clamp(Number(rawAnalysis?.score || 0), 0, 100)
+  const status = score >= paymentThreshold ? 'completed' : 'failed'
+  const decision = status === 'completed' ? 'pay' : 'skip'
+  const verdict = status === 'completed' ? 'Threshold passed' : 'Threshold not met'
+  const decisionReason =
+    String(rawAnalysis?.decisionReason || rawAnalysis?.reason || '').trim() ||
+    (status === 'completed'
+      ? 'AI assessed this task as payable based on its value and delivery clarity.'
+      : 'AI assessed this task as not payable because it does not meet the payout threshold.')
+
+  const fallbackSummary =
+    status === 'completed'
+      ? `AI decision: PAY. ${decisionReason} Score ${score}/100 (threshold ${paymentThreshold}).`
+      : `AI decision: DO NOT PAY. ${decisionReason} Score ${score}/100 (threshold ${paymentThreshold}).`
+
+  const factors = Array.isArray(rawAnalysis?.factors)
+    ? rawAnalysis.factors.map((item) => String(item)).filter(Boolean).slice(0, 6)
+    : []
+
   return {
-    score: Math.max(0, Math.min(100, Number(parsed.score ?? 0))),
-    status: parsed.status === 'completed' ? 'completed' : 'failed',
-    summary: String(parsed.summary ?? ''),
-    verdict: String(parsed.verdict ?? ''),
-    source: 'openai',
-    model: openAiModel,
+    score,
+    status,
+    decision,
+    verdict,
+    decisionReason,
+    summary: String(rawAnalysis?.summary || '').trim() || fallbackSummary,
+    factors,
+    source: String(rawAnalysis?.source || 'n8n-openai').trim(),
+  }
+}
+
+const callN8nWebhook = async (url, payload, defaultErrorMessage) => {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), n8nRequestTimeoutMs)
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+
+    const data = await readJsonSafely(response)
+    if (!response.ok || data?.ok === false) {
+      throw new Error(data?.message || `${defaultErrorMessage} (HTTP ${response.status}).`)
+    }
+
+    return data
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(`${defaultErrorMessage} timed out after ${n8nRequestTimeoutMs}ms.`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timeout)
   }
 }
 
@@ -168,7 +191,9 @@ app.get('/api/health', async (_req, res) => {
       lastRound: status['last-round'],
       paymentThreshold,
       paymentAmountAlgo,
-      analysisProvider: openAiApiKey ? 'openai' : 'local-fallback',
+      analysisProvider: n8nAnalyzeWebhookUrl ? 'n8n-openai-webhook' : 'algorand-local-analysis',
+      n8nAnalyzeEnabled: Boolean(n8nAnalyzeWebhookUrl),
+      n8nPayEnabled: Boolean(n8nPayWebhookUrl),
     })
   } catch (error) {
     res.status(500).json({
@@ -194,9 +219,27 @@ app.post('/api/analyze', async (req, res) => {
   }
 
   try {
-    const analysis = openAiApiKey
-      ? await analyzeWithOpenAI({ taskTitle, taskType, taskBudget, receiverAddress })
-      : buildLocalAnalysis({ taskTitle, taskType })
+    if (n8nAnalyzeWebhookUrl) {
+      const n8nPayload = buildAnalyzePayload({ taskTitle, taskType, taskBudget, receiverAddress })
+      const n8nResponse = await callN8nWebhook(
+        n8nAnalyzeWebhookUrl,
+        n8nPayload,
+        'n8n analyze request failed.',
+      )
+      const rawAnalysis =
+        n8nResponse.analysis && typeof n8nResponse.analysis === 'object'
+          ? n8nResponse.analysis
+          : n8nResponse
+      const analysis = normalizeAnalysis(rawAnalysis)
+
+      return res.json({
+        ok: true,
+        analysis,
+        threshold: paymentThreshold,
+      })
+    }
+
+    const analysis = buildLocalAnalysis({ taskTitle, taskType })
 
     return res.json({
       ok: true,
@@ -204,12 +247,19 @@ app.post('/api/analyze', async (req, res) => {
       threshold: paymentThreshold,
     })
   } catch (error) {
+    if (n8nAnalyzeWebhookUrl) {
+      return res.status(502).json({
+        ok: false,
+        message: error.message || 'n8n analyze request failed.',
+      })
+    }
+
     const fallback = buildLocalAnalysis({ taskTitle, taskType })
     return res.json({
       ok: true,
       analysis: {
         ...fallback,
-        source: 'local-fallback-after-error',
+        source: 'algorand-local-analysis-after-error',
         fallbackReason: error.message,
       },
       threshold: paymentThreshold,
@@ -217,7 +267,64 @@ app.post('/api/analyze', async (req, res) => {
   }
 })
 
-const handlePayRequest = async (req, res) => {
+const executePayment = async ({ taskId, score, normalizedReceiver, status, amountAlgo }) => {
+  const sender = await getPlatformAccount()
+  const suggestedParams = await algodClient.getTransactionParams().do()
+  const algoToSend = isPositiveNumber(amountAlgo) ? Number(amountAlgo) : paymentAmountAlgo
+  const amountMicroAlgos = algosdk.algosToMicroalgos(algoToSend)
+  const minFeeMicroAlgos = Number(suggestedParams.minFee || suggestedParams.fee || 1000)
+  const requiredMicroAlgos = amountMicroAlgos + minFeeMicroAlgos
+
+  const senderAccountInfo = await algodClient.accountInformation(sender.addr).do()
+  const senderBalanceMicroAlgos = Number(senderAccountInfo.amount || 0)
+
+  if (senderBalanceMicroAlgos < requiredMicroAlgos) {
+    const insufficientFundsError = new Error(
+      `Insufficient funds in sender account ${sender.addr}. Balance ${senderBalanceMicroAlgos} microAlgos is below required ${requiredMicroAlgos} microAlgos. Fund this Testnet account and retry.`,
+    )
+    insufficientFundsError.statusCode = 400
+    insufficientFundsError.payload = {
+      senderAddress: sender.addr,
+      balanceMicroAlgos: senderBalanceMicroAlgos,
+      requiredMicroAlgos,
+    }
+    throw insufficientFundsError
+  }
+
+  const notePayload = {
+    taskId,
+    score: Number(score),
+    status: String(status),
+  }
+
+  const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+    sender: sender.addr,
+    receiver: normalizedReceiver,
+    amount: amountMicroAlgos,
+    note: new TextEncoder().encode(JSON.stringify(notePayload)),
+    suggestedParams,
+  })
+
+  const signedTxn = txn.signTxn(sender.sk)
+  const submission = await algodClient.sendRawTransaction(signedTxn).do()
+  const confirmation = await algosdk.waitForConfirmation(algodClient, submission.txid, 4)
+
+  return {
+    ok: true,
+    taskId,
+    transactionId: submission.txid,
+    confirmedRound: confirmation['confirmed-round'],
+    explorerUrl: `${explorerBase}${submission.txid}`,
+    amountAlgo: algoToSend,
+    amountMicroAlgos,
+    note: notePayload,
+    senderAddress: sender.addr,
+    receiverAddress: normalizedReceiver,
+    threshold: paymentThreshold,
+  }
+}
+
+const validatePayPayload = (body) => {
   const {
     taskId,
     score,
@@ -225,34 +332,65 @@ const handlePayRequest = async (req, res) => {
     receiver,
     status = 'completed',
     amountAlgo,
-  } = req.body ?? {}
+  } = body ?? {}
   const normalizedReceiver = String(receiverAddress || receiver || '').trim()
 
   if (!taskId || typeof taskId !== 'string') {
-    return res.status(400).json({ ok: false, message: 'taskId is required.' })
+    return { ok: false, statusCode: 400, message: 'taskId is required.' }
   }
 
   if (!isPositiveNumber(score)) {
-    return res.status(400).json({ ok: false, message: 'score must be a positive number.' })
+    return { ok: false, statusCode: 400, message: 'score must be a positive number.' }
   }
 
   if (!validateAddress(normalizedReceiver)) {
-    return res.status(400).json({ ok: false, message: 'receiver must be a valid Algorand address.' })
+    return { ok: false, statusCode: 400, message: 'receiver must be a valid Algorand address.' }
   }
 
   if (!['completed', 'failed'].includes(String(status))) {
-    return res.status(400).json({ ok: false, message: 'status must be completed or failed.' })
+    return { ok: false, statusCode: 400, message: 'status must be completed or failed.' }
   }
 
-  if (Number(score) < paymentThreshold) {
-    return res.status(200).json({
-      ok: true,
-      skipped: true,
-      message: `Score ${score} is below the payment threshold of ${paymentThreshold}.`,
+  return {
+    ok: true,
+    payload: {
       taskId,
       score: Number(score),
-      threshold: paymentThreshold,
-    })
+      normalizedReceiver,
+      status: String(status),
+      amountAlgo,
+    },
+  }
+}
+
+const handlePayRequest = async (req, res) => {
+  const validation = validatePayPayload(req.body ?? {})
+  if (!validation.ok) {
+    return res.status(validation.statusCode).json({ ok: false, message: validation.message })
+  }
+
+  const { taskId, score, normalizedReceiver, status, amountAlgo } = validation.payload
+
+  if (n8nPayWebhookUrl) {
+    try {
+      const n8nResponse = await callN8nWebhook(
+        n8nPayWebhookUrl,
+        {
+          taskId,
+          receiver: normalizedReceiver,
+          score,
+          status,
+          amountAlgo,
+        },
+        'n8n pay request failed.',
+      )
+      return res.json(n8nResponse)
+    } catch (error) {
+      return res.status(502).json({
+        ok: false,
+        message: error.message || 'n8n pay request failed.',
+      })
+    }
   }
 
   if (String(status) !== 'completed') {
@@ -267,67 +405,67 @@ const handlePayRequest = async (req, res) => {
   }
 
   try {
-    const sender = await getPlatformAccount()
-    const suggestedParams = await algodClient.getTransactionParams().do()
-    const algoToSend = isPositiveNumber(amountAlgo) ? Number(amountAlgo) : paymentAmountAlgo
-    const amountMicroAlgos = algosdk.algosToMicroalgos(algoToSend)
-    const minFeeMicroAlgos = Number(suggestedParams.minFee || suggestedParams.fee || 1000)
-    const requiredMicroAlgos = amountMicroAlgos + minFeeMicroAlgos
-
-    const senderAccountInfo = await algodClient.accountInformation(sender.addr).do()
-    const senderBalanceMicroAlgos = Number(senderAccountInfo.amount || 0)
-
-    if (senderBalanceMicroAlgos < requiredMicroAlgos) {
-      return res.status(400).json({
-        ok: false,
-        message: `Insufficient funds in sender account ${sender.addr}. Balance ${senderBalanceMicroAlgos} microAlgos is below required ${requiredMicroAlgos} microAlgos. Fund this Testnet account and retry.`,
-        senderAddress: sender.addr,
-        balanceMicroAlgos: senderBalanceMicroAlgos,
-        requiredMicroAlgos,
-      })
-    }
-
-    const notePayload = {
+    const paymentResponse = await executePayment({
       taskId,
-      score: Number(score),
-      status: String(status),
-    }
-
-    const txn = algosdk.makePaymentTxnWithSuggestedParamsFromObject({
-      sender: sender.addr,
-      receiver: normalizedReceiver,
-      amount: amountMicroAlgos,
-      note: new TextEncoder().encode(JSON.stringify(notePayload)),
-      suggestedParams,
+      score,
+      normalizedReceiver,
+      status,
+      amountAlgo,
     })
 
-    const signedTxn = txn.signTxn(sender.sk)
-    const submission = await algodClient.sendRawTransaction(signedTxn).do()
-    const confirmation = await algosdk.waitForConfirmation(algodClient, submission.txid, 4)
-
-    return res.json({
-      ok: true,
-      taskId,
-      transactionId: submission.txid,
-      confirmedRound: confirmation['confirmed-round'],
-      explorerUrl: `${explorerBase}${submission.txid}`,
-      amountAlgo: algoToSend,
-      amountMicroAlgos,
-      note: notePayload,
-      senderAddress: sender.addr,
-      receiverAddress: normalizedReceiver,
-      threshold: paymentThreshold,
-    })
+    return res.json(paymentResponse)
   } catch (error) {
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       ok: false,
       message: error.message,
+      ...(error.payload || {}),
     })
   }
 }
 
 app.post('/api/pay', handlePayRequest)
 app.post('/api/send-transaction', handlePayRequest)
+
+app.post('/internal/algorand-pay', async (req, res) => {
+  const validation = validatePayPayload(req.body ?? {})
+  if (!validation.ok) {
+    return res.status(validation.statusCode).json({ ok: false, message: validation.message })
+  }
+
+  const { taskId, score, normalizedReceiver, status, amountAlgo } = validation.payload
+
+  if (Number(score) < paymentThreshold || status !== 'completed') {
+    return res.status(200).json({
+      ok: true,
+      skipped: true,
+      message:
+        Number(score) < paymentThreshold
+          ? `Score ${score} is below the payment threshold of ${paymentThreshold}.`
+          : 'Failed tasks do not trigger payment.',
+      taskId,
+      score,
+      threshold: paymentThreshold,
+    })
+  }
+
+  try {
+    const paymentResponse = await executePayment({
+      taskId,
+      score,
+      normalizedReceiver,
+      status,
+      amountAlgo,
+    })
+
+    return res.json(paymentResponse)
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      ok: false,
+      message: error.message,
+      ...(error.payload || {}),
+    })
+  }
+})
 
 app.get('/api/verify/:txId', async (req, res) => {
   const txId = String(req.params.txId || '').trim()

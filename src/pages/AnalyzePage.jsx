@@ -12,6 +12,7 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 import { receiverRules } from '../content'
+import { API } from '../config'
 
 export function AnalyzePage({
   selectedStackItemId,
@@ -39,8 +40,14 @@ export function AnalyzePage({
   const score = workflowState.score ?? null
   const scorePasses = score !== null && score >= threshold
   const aiSummary = workflowState.analysis?.summary || ''
+  const decisionReason = workflowState.analysis?.decisionReason || ''
+  const analysisFactors = Array.isArray(workflowState.analysis?.factors)
+    ? workflowState.analysis.factors.filter(Boolean)
+    : []
   const txId = workflowState.txId || ''
-  const explorerLink = workflowState.explorerUrl || ''
+  const explorerLink = txId
+    ? `${API.explorerBase}${encodeURIComponent(String(txId).trim())}`
+    : workflowState.explorerUrl || ''
   const safeBudget = Number.isFinite(Number(taskBudget)) ? Number(taskBudget).toFixed(2) : taskBudget
 
   const getQualityFromScore = (value) => {
@@ -277,6 +284,20 @@ export function AnalyzePage({
                     <div className="result-block">
                       <span className="result-block-label">AI Summary</span>
                       <p className="result-summary-text">{aiSummary}</p>
+                    </div>
+                  )}
+
+                  {decisionReason && (
+                    <div className="result-block">
+                      <span className="result-block-label">Decision Reason</span>
+                      <p className="result-summary-text">{decisionReason}</p>
+                    </div>
+                  )}
+
+                  {analysisFactors.length > 0 && (
+                    <div className="result-block">
+                      <span className="result-block-label">Scoring Factors</span>
+                      <p className="result-summary-text">{analysisFactors.join(' ')}</p>
                     </div>
                   )}
 

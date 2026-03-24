@@ -1,35 +1,42 @@
 import { useEffect, useState } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Navbar } from './components/Navbar'
 import { AnalyzePage } from './pages/AnalyzePage'
 import { DashboardPage } from './pages/DashboardPage'
 import { HomePage } from './pages/HomePage'
+import { LandingPage } from './pages/LandingPage'
 import { VerifyPage } from './pages/VerifyPage'
 import { API } from './config'
 
 const threshold = 75
-const storageKey = 'task-economy-on-blockchain-state'
+const storageKey = 'task-economy-on-blockchain-state-v2'
 
-const initialTasks = [
-  {
-    id: 'TASK-2401',
-    title: 'Execute AI task payout after score threshold passes',
-    budget: '0.10 ALGO',
-    status: 'Completed',
-    rewardTx: 'NB4F...UF6Q',
-    proofHash: '{"taskId":"TASK-2401","score":91,"status":"completed"}',
-    verification: 'Payment executed on Algorand Testnet and proof is available in the explorer.',
-  },
-  {
-    id: 'TASK-2402',
-    title: 'Reject payout when score is below threshold',
-    budget: '0.10 ALGO',
-    status: 'Open',
-    rewardTx: 'No transaction',
-    proofHash: '{"taskId":"TASK-2402","score":62,"status":"failed"}',
-    verification: 'Threshold rule prevented blockchain payment.',
-  },
-]
+const initialTasks = []
+
+const isDemoTask = (task) => {
+  const id = String(task?.id || '')
+  return id === 'TASK-2401' || id === 'TASK-2402'
+}
+
+const sanitizeTasks = (tasks) =>
+  Array.isArray(tasks) ? tasks.filter((task) => !isDemoTask(task)) : []
+
+const readJsonResponse = async (response, defaultMessage) => {
+  const rawText = await response.text()
+
+  if (!rawText || !rawText.trim()) {
+    if (!response.ok) {
+      throw new Error(`${defaultMessage} (HTTP ${response.status})`)
+    }
+    return {}
+  }
+
+  try {
+    return JSON.parse(rawText)
+  } catch {
+    throw new Error(`Service returned invalid JSON (HTTP ${response.status}).`)
+  }
+}
 
 const loadPersistedState = () => {
   if (typeof window === 'undefined') {
@@ -45,15 +52,15 @@ const loadPersistedState = () => {
 }
 
 function App() {
+  const location = useLocation()
+  const isLandingPage = location.pathname === '/'
   const persistedState = loadPersistedState()
   const [selectedStackItemId, setSelectedStackItemId] = useState(persistedState?.selectedStackItemId || 'algosdk')
-  const [tasks, setTasks] = useState(persistedState?.tasks || initialTasks)
+  const [tasks, setTasks] = useState(sanitizeTasks(persistedState?.tasks) || initialTasks)
   const [taskTitle, setTaskTitle] = useState(persistedState?.taskTitle || 'Trigger Algorand-native payment after AI evaluation')
   const [taskBudget, setTaskBudget] = useState(persistedState?.taskBudget || '0.10')
   const [taskType, setTaskType] = useState(persistedState?.taskType || 'Code Review')
-  const [receiverAddress, setReceiverAddress] = useState(
-    persistedState?.receiverAddress || '77432YTGN5CDXV6N5F275UQXCQ3WTOSNQPZIROYXOSDJL6GW7E3EIKQ2YE',
-  )
+  const [receiverAddress, setReceiverAddress] = useState(persistedState?.receiverAddress || '')
   const [workflowState, setWorkflowState] = useState(
     persistedState?.workflowState || {
       phase: 'idle',
@@ -128,9 +135,9 @@ function App() {
         }),
       })
 
-      const analysisData = await analysisResponse.json()
+      const analysisData = await readJsonResponse(analysisResponse, 'Task analysis request failed.')
       if (!analysisResponse.ok || !analysisData.ok) {
-        throw new Error(analysisData.message || 'Task analysis request failed.')
+        throw new Error(analysisData.message || `Task analysis request failed (HTTP ${analysisResponse.status}).`)
       }
 
       analysis = analysisData.analysis
@@ -192,9 +199,9 @@ function App() {
         }),
       })
 
-      const data = await response.json()
+      const data = await readJsonResponse(response, 'Algorand payment request failed.')
       if (!response.ok || !data.ok) {
-        throw new Error(data.message || 'Algorand payment request failed.')
+        throw new Error(data.message || `Algorand payment request failed (HTTP ${response.status}).`)
       }
 
       if (data.skipped) {
@@ -282,11 +289,12 @@ function App() {
       <div className="hero-orbit hero-orbit-a" />
       <div className="hero-orbit hero-orbit-b" />
 
-      <Navbar />
+      {!isLandingPage ? <Navbar /> : null}
 
       <main className="app-main">
         <Routes>
-          <Route path="/" element={<HomePage threshold={threshold} />} />
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/home" element={<HomePage threshold={threshold} />} />
           <Route
             path="/analyze"
             element={

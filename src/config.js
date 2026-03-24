@@ -1,32 +1,19 @@
-// ─── API Configuration ──────────────────────────────────────────────────────
-// Local development (localhost): uses Express backend via /api (Vite proxy).
-// Deployed static app: requires VITE_N8N_WEBHOOK_BASE.
-//
-// Optional env var:
-//   VITE_N8N_WEBHOOK_BASE=https://YOUR-INSTANCE.app.n8n.cloud/webhook
-//   VITE_USE_N8N_ON_LOCALHOST=true
-// ─────────────────────────────────────────────────────────────────────────────
+// API configuration
+// Local development uses the bundled Express backend through Vite's /api proxy.
+// Production can override either endpoint with VITE_ANALYZE_URL / VITE_PAY_URL.
 
-const configuredWebhookBase = String(import.meta.env.VITE_N8N_WEBHOOK_BASE || '').trim()
-const isLocalhost =
-  typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
-const useN8nOnLocalhost = String(import.meta.env.VITE_USE_N8N_ON_LOCALHOST || 'false').toLowerCase() === 'true'
+const API_BASE = String(import.meta.env.VITE_API_BASE || '/api').trim() || '/api'
+const ANALYZE_URL = String(import.meta.env.VITE_ANALYZE_URL || '').trim()
+const PAY_URL = String(import.meta.env.VITE_PAY_URL || '').trim()
 
-const API_BASE = isLocalhost
-  ? (useN8nOnLocalhost && configuredWebhookBase ? configuredWebhookBase : '/api')
-  : configuredWebhookBase
-
-// Algorand Testnet indexer (public, no auth needed)
 const INDEXER_BASE = 'https://testnet-idx.algonode.cloud'
-const EXPLORER_BASE = 'https://testnet.algoexplorer.io/tx/'
+const EXPLORER_BASE =
+  String(import.meta.env.VITE_ALGO_EXPLORER_BASE || '').trim() ||
+  'https://testnet.explorer.perawallet.app/tx/'
 
 export const API = {
-  analyze: `${API_BASE}/analyze`,
-  pay: `${API_BASE}/pay`,
+  analyze: ANALYZE_URL || `${API_BASE}/analyze`,
+  pay: PAY_URL || `${API_BASE}/pay`,
   indexerBase: INDEXER_BASE,
   explorerBase: EXPLORER_BASE,
-}
-
-if (!configuredWebhookBase && (!isLocalhost || useN8nOnLocalhost)) {
-  console.warn('VITE_N8N_WEBHOOK_BASE is not set. Analyze/Pay endpoints will not be available in deployed mode.')
 }

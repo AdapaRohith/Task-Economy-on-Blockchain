@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { ShieldCheck } from 'lucide-react'
 
 const links = [
-  { to: '/', label: 'Home' },
+  { to: '/home', label: 'Home' },
   { to: '/analyze', label: 'Analyze' },
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/verify', label: 'Verify' },
